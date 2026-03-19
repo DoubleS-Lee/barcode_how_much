@@ -190,6 +190,16 @@ T-F01: 앱 기본 구조 설정 (main.dart, 라우팅, 테마)
               앱 시작 시 위치 요청 = 거부율 높음 + Apple/Google 가이드라인 위반
               위치 권한은 T-F04 수동 저장 팝업에서 필요할 때만 요청
 T-F02: 바코드 스캐너 화면 (Type 1 UX — 앱 실행 즉시 카메라)
+        - [스캔 타입 자동 분류] google_mlkit_barcode_scanning이 BarcodeFormat + BarcodeValueType 반환
+          → EAN_13 / EAN_8 / UPC_A / UPC_E  →  [상품 가격 비교 플로우] (T-F03)
+          → QR_CODE (URL)      →  "이 링크를 열까요?" 도메인 미리보기 팝업 + [열기] [히스토리 저장]
+          → QR_CODE (WIFI)     →  "이 WiFi에 연결할까요?" SSID 표시 팝업 + [연결] [저장]
+          → QR_CODE (EMAIL)    →  메일 앱 열기
+          → QR_CODE (PHONE)    →  전화 앱 열기
+          → QR_CODE (CONTACT)  →  연락처 저장 제안
+          → QR_CODE (TEXT)     →  텍스트 표시 + [복사] [저장]
+          → 기타 (Code128 등)  →  원문 표시 + [복사] [저장]
+          ※ 상품 바코드가 아닌 모든 타입도 히스토리에 저장 (scan_type 구분)
         - 네트워크 지연/단절 시 UX 처리 (대형 마트 지하 데드존 대응)
           → API 호출 중: 스켈레톤 UI (결과 카드 영역에 shimmer 애니메이션)
           → 타임아웃(3초) 발생 시: 에러 코드 대신 친근한 안내
@@ -202,13 +212,23 @@ T-F04: 수동 저장 팝업 (거대 숫자 키패드 UI)
         - [여기서 위치 권한 요청] — 맥락이 명확하므로 허용률 높음
           → 허용: GPS 좌표 수집 + 역지오코딩으로 "이마트 강남점 근처" 표시
           → 거부: 위치 없이 가격만 저장 (강요하지 않음)
-T-F05: 내 스캔 이력 화면 + 가격 변동 그래프
-        - 가로축: 스캔 날짜, 세로축: 금액 (온라인 최저가 + 수동 입력 오프라인 가격)
+T-F05: 내 스캔 이력 화면 (상품 / 비상품 혼합 히스토리 + 가격 변동 그래프)
+        [이력 리스트 — 전체 스캔 타입 통합 표시]
+        - 아이콘으로 타입 구분: 📦 상품 | 🌐 URL | 📶 WiFi | 👤 연락처 | 📝 텍스트
+        - 상품: 상품명 + 최저가 요약 / 비상품: 타입 설명 + 내용 미리보기 (30자 truncate)
+        - 탭 시 상세 화면 → 상품이면 그래프, 비상품이면 내용 전체 + 액션 버튼
+
+        [상품 상세 — 가격 변동 그래프]
         - 차트 라이브러리: fl_chart (Flutter 생태계 표준, 무료)
-        - 데이터 포인트: 스캔 1회 = 점 1개. 탭 시 날짜/가격 툴팁 표시
-        - 선 색상: 온라인 최저가(파랑), 수동 입력 오프라인 가격(주황) — 두 선 겹쳐서 비교
-        - Y축: 최저값 하단 여백 10%, 최고값 상단 여백 10% (꽉 차지 않게)
+        - 두 선을 같은 그래프에 겹쳐서 비교:
+            파랑선 ━━  온라인 최저가 (쿠팡/네이버 중 낮은 값, 스캔 시마다 기록)
+            주황선 ━━  오프라인 현재가 (유저 수동 입력, 마트 실제 가격)
+        - 데이터 포인트: 스캔 1회 = 점 1개. 탭 시 날짜/가격/플랫폼 툴팁 표시
+        - 오프라인 가격이 없는 날은 주황선 단절 (null 처리, 이어 붙이지 않음)
+        - Y축: 두 선 중 최저값 하단 여백 10%, 최고값 상단 여백 10%
         - X축: 날짜 라벨 (MM/DD 형식), 데이터 많을 시 자동 skip
+        - 그래프 하단 수치 요약:
+            "온라인 최저가: 9,800원 (쿠팡) | 내가 산 가격: 12,500원 | 차이: 2,700원"
         - 그래프 하단: 날짜별 스캔 목록 (스크롤 가능)
 T-F06: AdMob 배너 광고 연동 (결과 화면 하단)
         - Dart 코드(google_mobile_ads 패키지) 구현
@@ -259,16 +279,22 @@ T-B01: 프로젝트 구조 설정 (TypeScript, ESLint, Prettier)
 T-B02: PostgreSQL 스키마 설계 및 Prisma 마이그레이션
         - devices: 익명 기기 (device_uuid, os, country, app_version)
         - products: 상품 마스터 (barcode, name, brand, category, image_url)
-        - scans: 스캔 이벤트 팩트 테이블 (device_id, barcode, lat, lng, scanned_at)
+        - scans: 스캔 이벤트 팩트 테이블 (device_id, scan_type, barcode, lat, lng, scanned_at)
+          → scan_type: 'product' | 'qr_url' | 'qr_wifi' | 'qr_contact' | 'qr_text' | 'unknown'
+          → barcode는 상품 스캔 시만 사용 (비상품 스캔 시 NULL 허용, FK 제거)
         - online_prices: 스캔 당시 플랫폼별 전체 가격 (scan_id, platform, price, is_lowest)
         - offline_prices: 유저 수동 입력 오프라인 가격 (scan_id, price, store_hint)
+        - barcode_contents: 비상품 바코드 원문 저장 (scan_id, raw_value, content_type, parsed_data JSONB)
 T-B03: Redis 캐싱 레이어 구현 (TTL 30분)
 T-B04: 가격 조회 엔드포인트 (GET /price?barcode={ean})
         - Redis 캐시 확인 → 미스 시 병렬 API 호출
 T-B05: 스캔 저장 엔드포인트 (POST /api/v1/scans)
         - 기기 uuid로 devices 테이블 upsert → scan_id 반환
-        - online_prices에 모든 플랫폼 가격 INSERT (최저가 1개만 아님)
+        - scan_type 기반 분기:
+            'product' → products upsert + online_prices INSERT (모든 플랫폼 가격)
+            'qr_*' / 'unknown' → barcode_contents INSERT (raw_value + parsed_data JSONB)
 T-B05-B: 오프라인 가격 저장 엔드포인트 (POST /api/v1/scans/{scan_id}/offline-price)
+        - scan_type = 'product' 인 scan_id에만 허용 (비상품 스캔에 가격 입력 불가 validation)
 T-B06: 에러 핸들링 미들웨어 (API 타임아웃, 재시도 로직)
 T-B07: 환경변수 관리 (.env.example 포함)
 T-B08: 단위 테스트 (Jest) — 핵심 로직 70%+ 커버리지
@@ -538,10 +564,12 @@ barcode_app/
 #### 테이블 관계도
 
 ```
-devices ──< scans >── products
-               │
-               ├──< online_prices   (스캔 당시 플랫폼별 전체 가격)
-               └──< offline_prices  (유저 직접 입력한 오프라인 가격 ← 핵심 자산)
+devices ──< scans ──────────────────────────────────────┐
+               │ scan_type = 'product'                   │ scan_type = 'qr_*' | 'unknown'
+               │                                         ↓
+               │ (barcode → products 조인)         barcode_contents
+               ├──< online_prices   (플랫폼별 가격, 파랑선 데이터)  (raw_value + parsed_data JSONB)
+               └──< offline_prices  (유저 수동 입력, 주황선 데이터 ← 핵심 자산)
 ```
 
 #### 스키마
@@ -570,15 +598,31 @@ CREATE TABLE products (
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 스캔 이벤트 (팩트 테이블 — 1스캔 = 1행)
+-- 스캔 이벤트 (팩트 테이블 — 1스캔 = 1행, 상품/비상품 모두 저장)
 -- 스캔 즉시 서버에 INSERT. 오프라인 시 로컬 큐에 저장 후 복구 시 자동 전송.
 CREATE TABLE scans (
   id          BIGSERIAL PRIMARY KEY,
   device_id   BIGINT NOT NULL REFERENCES devices(id),
-  barcode     VARCHAR(20) NOT NULL REFERENCES products(barcode),
+  scan_type   VARCHAR(20) NOT NULL DEFAULT 'product',
+              -- 'product' | 'qr_url' | 'qr_wifi' | 'qr_contact' | 'qr_text' | 'unknown'
+  barcode     VARCHAR(20),                     -- 상품 스캔 시만 사용. 비상품 시 NULL.
   latitude    DECIMAL(9,6),                    -- 선택. 소수점 6자리 = 약 11cm 정밀도
   longitude   DECIMAL(9,6),
   scanned_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 비상품 바코드 원문 내용 저장 (QR코드, Code128 등)
+CREATE TABLE barcode_contents (
+  id            BIGSERIAL PRIMARY KEY,
+  scan_id       BIGINT NOT NULL REFERENCES scans(id),
+  raw_value     TEXT NOT NULL,                 -- 스캔된 원문 전체
+  content_type  VARCHAR(20) NOT NULL,          -- 'url' | 'wifi' | 'contact' | 'text' | 'email' | 'phone'
+  parsed_data   JSONB,
+  -- URL이면:     {"url": "https://...", "domain": "naver.com"}
+  -- WiFi면:      {"ssid": "iptime_1234", "security": "WPA"}
+  -- 연락처면:    {"name": "홍길동", "phone": "010-1234-5678"}
+  -- 텍스트면:    {"text": "주차 정산 코드: 1234"}
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 스캔 당시 플랫폼별 전체 가격 (빅데이터 핵심)
@@ -613,6 +657,9 @@ CREATE TABLE offline_prices (
 | 위치 정보 | VARCHAR 비구조화 | **위경도 숫자** (반경 N km 쿼리 가능) |
 | 저장 전략 | 로컬 주, 서버 선택적 | **서버 필수**, 로컬은 fallback |
 | 오프라인 가격 | scan_history에 혼재 | **offline_prices 독립 테이블** |
+| 비상품 스캔 | 저장 안 됨 | **barcode_contents 테이블** (QR/URL/WiFi 등 전부 저장) |
+| 스캔 타입 구분 | 없음 (상품만 가정) | **scan_type 컬럼** (product/qr_url/qr_wifi/qr_text 등) |
+| 가격 그래프 | 단일 선 | **두 선 비교** (온라인 최저가 파랑 + 오프라인 현재가 주황) |
 
 #### 이 구조로 가능한 빅데이터 분석
 
@@ -847,8 +894,12 @@ Amazon PA API 5.0은 단일 SDK로 여러 나라 지원 → 확장 비용 낮음
 - [ ] 오프라인 수동 입력 시 즉시 서버 저장 (offline_prices INSERT)
 - [ ] 오프라인 상태에서 스캔 → 로컬 큐 저장 → 네트워크 복구 시 자동 전송
 - [ ] 재스캔 시 가격 변동 그래프 표시 (가로축: 날짜, 세로축: 금액)
-- [ ] 온라인 최저가(파랑선) + 수동 입력 오프라인 가격(주황선) 두 선 동시 표시
-- [ ] 그래프 데이터 포인트 탭 시 날짜/가격 툴팁 표시
+- [ ] 온라인 최저가(파랑선) + 오프라인 현재가(주황선) 두 선 같은 그래프에 동시 표시
+- [ ] 오프라인 가격 없는 날짜는 주황선 단절 처리 (null → 이어 붙이기 금지)
+- [ ] 그래프 하단 수치 요약: "온라인 최저가 / 내가 산 가격 / 차이" 표시
+- [ ] 그래프 데이터 포인트 탭 시 날짜/가격/플랫폼 툴팁 표시
+- [ ] 비상품 바코드(QR/URL/WiFi 등) 스캔 시 타입별 액션 팝업 표시
+- [ ] 비상품 스캔도 히스토리에 타입 아이콘과 함께 저장 확인 (barcode_contents)
 - [ ] 수동 저장 팝업 → 거대 키패드 → 저장 → 토스트 메시지
 - [ ] AdMob 배너 광고 결과 화면 하단 노출
 - [ ] 카카오톡 공유 → 링크 포함 메시지 전송
