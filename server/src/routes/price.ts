@@ -1,0 +1,97 @@
+import { Router, Request, Response } from 'express';
+import { z } from 'zod';
+import { getCached, setCache, getCacheKey } from '../cache/redis';
+import { PriceResponse } from '../types/price.types';
+import { priceOrchestrator } from '../services/price-orchestrator.service';
+import prisma from '../db/prisma';
+
+const router = Router();
+
+const barcodeSchema = z.string().regex(/^\d{8,13}$/, 'Barcode must be 8-13 digits');
+
+// GET /api/v1/price?barcode=8801234567890
+router.get('/', async (req: Request, res: Response) => {
+  const parseResult = barcodeSchema.safeParse(req.query.barcode);
+  if (!parseResult.success) {
+    return res.status(400).json({
+      error: 'INVALID_BARCODE',
+      message: '바코드 형식이 올바르지 않습니다. (8~13자리 숫자)',
+    });
+  }
+
+  const barcode = parseResult.data;
+  const cacheKey = getCacheKey('price', barcode);
+
+  // 1. Redis 캐시 확인
+  const cached = await getCached<PriceResponse>(cacheKey);
+  if (cached) {
+    const ageMinutes = Math.floor((Date.now() - new Date(cached.cached_at).getTime()) / 60000);
+    return res.json({ ...cached, cache_age_minutes: ageMinutes });
+  }
+
+  // 2. 자체 DB(products 테이블)에서 상품명 선조회
+  // → 있으면 OFF/go-upc 호출 없이 바로 네이버 검색으로 단축
+  const cachedProduct = await prisma.product.findUnique({
+    where: { barcode },
+    select: { name: true },
+  });
+  // Mock 이름은 신뢰하지 않음 (개발환경 오염 방지)
+  const knownProductName = cachedProduct?.name?.includes('(Mock)')
+    ? undefined
+    : cachedProduct?.name ?? undefined;
+  if (knownProductName) {
+    console.log(`[Price] Found in local DB: "${knownProductName}"`);
+  }
+
+  // 3. 캐시 미스 → 병렬 API 호출 (Promise.allSettled in orchestrator)
+  const result = await priceOrchestrator(barcode, knownProductName);
+
+  if (!result) {
+    return res.status(404).json({
+      error: 'PRODUCT_NOT_FOUND',
+      message: '등록된 상품 정보가 없습니다.',
+      fallback_tried: ['coupang', 'naver', 'openfoodfacts'],
+    });
+  }
+
+  await setCache(cacheKey, result);
+
+  // 상품명/이미지를 products 테이블에 upsert (히스토리 표시용)
+  // Mock 이름은 저장하지 않음
+  if (result.product_name && !result.product_name.includes('(Mock)')) {
+    prisma.product.upsert({
+      where: { barcode },
+      update: { name: result.product_name, imageUrl: result.image_url },
+      create: { barcode, name: result.product_name, imageUrl: result.image_url },
+    }).catch(() => {}); // 저장 실패해도 가격 응답은 정상 반환
+  }
+
+  return res.json(result);
+});
+
+// PATCH /api/v1/price/products/:barcode — 상품명 직접 수정
+router.patch('/products/:barcode', async (req: Request, res: Response) => {
+  const barcodeParseResult = barcodeSchema.safeParse(req.params.barcode);
+  if (!barcodeParseResult.success) {
+    return res.status(400).json({ error: 'INVALID_BARCODE' });
+  }
+
+  const bodySchema = z.object({ name: z.string().min(1).max(200) });
+  const bodyResult = bodySchema.safeParse(req.body);
+  if (!bodyResult.success) {
+    return res.status(400).json({ error: 'INVALID_NAME', message: '상품명을 입력해주세요.' });
+  }
+
+  const barcode = barcodeParseResult.data;
+  const { name } = bodyResult.data;
+
+  const product = await prisma.product.upsert({
+    where: { barcode },
+    update: { name },
+    create: { barcode, name },
+  });
+
+  return res.json({ barcode: product.barcode, name: product.name });
+});
+
+export default router;

@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id          BigInt   @id @default(autoincrement())
+  deviceUuid  String   @unique @map("device_uuid") @db.VarChar(36)
+  os          String   @db.VarChar(10)
+  country     String   @default("KR") @db.VarChar(10)
+  appVersion  String?  @map("app_version") @db.VarChar(20)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  scans       Scan[]
+
+  @@map("devices")
+}
+
+model Product {
+  id        BigInt   @id @default(autoincrement())
+  barcode   String   @unique @db.VarChar(20)
+  name      String   @db.VarChar(500)
+  brand     String?  @db.VarChar(200)
+  category  String?  @db.VarChar(100)
+  imageUrl  String?  @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("products")
+}
+
+// 스캔 이벤트 팩트 테이블 — 상품/비상품 모두 저장
+model Scan {
+  id             BigInt          @id @default(autoincrement())
+  deviceId       BigInt          @map("device_id")
+  device         Device          @relation(fields: [deviceId], references: [id])
+  scanType       String          @default("product") @map("scan_type") @db.VarChar(20)
+  // scan_type: 'product' | 'qr_url' | 'qr_wifi' | 'qr_contact' | 'qr_text' | 'isbn' | 'unknown'
+  barcode        String?         @db.VarChar(20)
+  latitude       Decimal?        @db.Decimal(9, 6)
+  longitude      Decimal?        @db.Decimal(9, 6)
+  scannedAt      DateTime        @default(now()) @map("scanned_at")
+  onlinePrices   OnlinePrice[]
+  offlinePrices  OfflinePrice[]
+  barcodeContent BarcodeContent?
+
+  @@map("scans")
+}
+
+// 상품 스캔 시 플랫폼별 온라인 가격 (모든 플랫폼 저장 — 빅데이터 핵심)
+model OnlinePrice {
+  id        BigInt   @id @default(autoincrement())
+  scanId    BigInt   @map("scan_id")
+  scan      Scan     @relation(fields: [scanId], references: [id])
+  platform  String   @db.VarChar(30)
+  price     Int
+  isLowest  Boolean  @default(false) @map("is_lowest")
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+
+  @@map("online_prices")
+}
+
+// 유저 직접 입력 오프라인 가격 (가장 희귀하고 귀한 데이터)
+model OfflinePrice {
+  id        BigInt   @id @default(autoincrement())
+  scanId    BigInt   @map("scan_id")
+  scan      Scan     @relation(fields: [scanId], references: [id])
+  price     Int
+  storeHint String?  @map("store_hint") @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("offline_prices")
+}
+
+// 비상품 바코드 원문 내용 (QR URL, WiFi, 연락처, 텍스트 등)
+model BarcodeContent {
+  id          BigInt   @id @default(autoincrement())
+  scanId      BigInt   @unique @map("scan_id")
+  scan        Scan     @relation(fields: [scanId], references: [id])
+  rawValue    String   @map("raw_value")
+  contentType String   @map("content_type") @db.VarChar(20)
+  // content_type: 'url' | 'wifi' | 'contact' | 'text' | 'email' | 'phone'
+  parsedData  Json?    @map("parsed_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("barcode_contents")
+}
