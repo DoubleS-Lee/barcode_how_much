@@ -74,8 +74,9 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
 
       // 마트 입력가를 PriceResult 화면과 공유
       ref.read(offlinePriceProvider(widget.barcode).notifier).state = offlinePrice;
-      // 가격 이력 그래프 갱신
+      // 가격 이력 그래프 + 스캔 기록 갱신
       ref.invalidate(priceHistoryProvider(widget.barcode));
+      ref.invalidate(scanHistoryProvider);
 
       if (mounted) context.pushReplacement('/price-result/${widget.barcode}');
     } catch (e) {

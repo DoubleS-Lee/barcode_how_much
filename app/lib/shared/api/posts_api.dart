@@ -134,7 +134,7 @@ class PostsApi {
   static final _dio = client.dio;
 
   static Future<List<PostModel>> fetchPosts({int page = 1, String? search, String? deviceUuid}) async {
-    final res = await _dio.get('/posts', queryParameters: {
+    final res = await _dio.get('/api/v1/posts', queryParameters: {
       'page': page,
       'limit': 20,
       if (search != null && search.isNotEmpty) 'search': search,
@@ -155,7 +155,7 @@ class PostsApi {
     double? longitude,
     String? locationHint,
   }) async {
-    final res = await _dio.post('/posts', data: {
+    final res = await _dio.post('/api/v1/posts', data: {
       'device_uuid': deviceUuid,
       'title': title,
       'content': content,
@@ -181,7 +181,7 @@ class PostsApi {
     double? longitude,
     String? locationHint,
   }) async {
-    final res = await _dio.put('/posts/$id', data: {
+    final res = await _dio.put('/api/v1/posts/$id', data: {
       'device_uuid': deviceUuid,
       'title': title,
       'content': content,
@@ -199,14 +199,14 @@ class PostsApi {
     required String id,
     required String deviceUuid,
   }) async {
-    await _dio.delete('/posts/$id', data: {'device_uuid': deviceUuid});
+    await _dio.delete('/api/v1/posts/$id', data: {'device_uuid': deviceUuid});
   }
 
   static Future<Map<String, dynamic>> likePost({
     required String id,
     required String deviceUuid,
   }) async {
-    final res = await _dio.post('/posts/$id/like', data: {'device_uuid': deviceUuid});
+    final res = await _dio.post('/api/v1/posts/$id/like', data: {'device_uuid': deviceUuid});
     return res.data as Map<String, dynamic>;
   }
 
@@ -214,7 +214,7 @@ class PostsApi {
     required String id,
     String? deviceUuid,
   }) async {
-    final res = await _dio.get('/posts/$id/comments', queryParameters: {
+    final res = await _dio.get('/api/v1/posts/$id/comments', queryParameters: {
       if (deviceUuid != null) 'device_uuid': deviceUuid,
     });
     return (res.data as List).map((e) => PostCommentModel.fromJson(e)).toList();
@@ -225,7 +225,7 @@ class PostsApi {
     required String deviceUuid,
     required String content,
   }) async {
-    final res = await _dio.post('/posts/$id/comments', data: {
+    final res = await _dio.post('/api/v1/posts/$id/comments', data: {
       'device_uuid': deviceUuid,
       'content': content,
     });
@@ -237,6 +237,6 @@ class PostsApi {
     required String commentId,
     required String deviceUuid,
   }) async {
-    await _dio.delete('/posts/$postId/comments/$commentId', data: {'device_uuid': deviceUuid});
+    await _dio.delete('/api/v1/posts/$postId/comments/$commentId', data: {'device_uuid': deviceUuid});
   }
 }

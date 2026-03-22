@@ -4,14 +4,14 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
 
 class AppBottomNav extends StatelessWidget {
-  /// 0=스캔, 1=기록, 2=통계, 3=설정
+  /// 0=스캔, 1=기록, 2=공유 게시판, 3=설정
   final int currentIndex;
   const AppBottomNav({super.key, required this.currentIndex});
 
   static const _items = [
     (icon: Icons.center_focus_strong, label: '스캔', route: '/scanner'),
-    (icon: Icons.receipt_long, label: '기록', route: '/history'),
-    (icon: Icons.leaderboard, label: '통계', route: '/statistics'),
+    (icon: Icons.receipt_long, label: '상품 기록', route: '/history'),
+    (icon: Icons.campaign_outlined, label: '공유 게시판', route: '/community'),
     (icon: Icons.settings, label: '설정', route: '/settings'),
   ];
 

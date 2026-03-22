@@ -189,11 +189,23 @@ class PriceGraphWidget extends StatelessWidget {
                     getTooltipColor: (_) => kPrimaryDark,
                     tooltipRoundedRadius: 10,
                     getTooltipItems: (spots) => spots.map((spot) {
-                      final isOnline = spot.barIndex == 0;
+                      final idx = spot.x.toInt().clamp(0, priceHistory.length - 1);
+                      final item = priceHistory[idx];
+                      String label;
+                      Color labelColor;
+                      if (spot.barIndex == 0) {
+                        final platform = item['online_lowest_platform'] as String?;
+                        label = platform == 'coupang' ? '쿠팡' : platform == 'naver' ? '네이버' : '온라인';
+                        labelColor = Colors.blue.shade200;
+                      } else {
+                        final hint = item['store_hint'] as String?;
+                        label = (hint != null && hint.isNotEmpty) ? hint : '마트';
+                        labelColor = Colors.amber.shade200;
+                      }
                       return LineTooltipItem(
-                        '${isOnline ? "온라인" : "마트"}\n${nf.format(spot.y.toInt())}원',
+                        '$label\n${nf.format(spot.y.toInt())}원',
                         GoogleFonts.inter(
-                          color: isOnline ? Colors.blue.shade200 : Colors.amber.shade200,
+                          color: labelColor,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),

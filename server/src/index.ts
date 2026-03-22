@@ -7,7 +7,9 @@ import priceRouter from './routes/price';
 import scansRouter from './routes/scans';
 import recommendRouter from './routes/recommend';
 import postsRouter from './routes/posts';
+import devicesRouter from './routes/devices';
 import { errorHandler } from './middleware/error';
+import { startPriceAlertCron } from './services/priceAlert.service';
 
 dotenv.config();
 
@@ -24,8 +26,11 @@ app.use('/api/v1/price', priceRouter);
 app.use('/api/v1/scans', scansRouter);
 app.use('/api/v1/recommend', recommendRouter);
 app.use('/api/v1/posts', postsRouter);
+app.use('/api/v1/devices', devicesRouter);
 
 app.use(errorHandler);
+
+startPriceAlertCron();
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on http://localhost:${PORT}`);

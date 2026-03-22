@@ -266,46 +266,7 @@ class _HistoryBody extends ConsumerWidget {
                 ),
         ),
 
-        // 절약 통계
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          sliver: SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('절약 현황',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                    child: _SavingsCard(
-                      icon: Icons.savings_outlined,
-                      iconColor: kAmber,
-                      backgroundColor: kPrimary,
-                      title: '이번 달 절약 가능 금액',
-                      value: '12,800원',
-                      valueColor: Colors.white,
-                      titleColor: Colors.white.withValues(alpha: 0.85),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _SavingsCard(
-                      icon: Icons.trending_down,
-                      iconColor: kPrimary,
-                      backgroundColor: kSurface,
-                      title: '스캔 상품 종류',
-                      value: '${productGroups.length}종',
-                      valueColor: kPrimary,
-                      titleColor: kOnSurface,
-                      bordered: true,
-                    ),
-                  ),
-                ]),
-              ],
-            ),
-          ),
-        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
       ],
     );
   }
@@ -645,37 +606,3 @@ class _NonProductHistoryCard extends StatelessWidget {
   }
 }
 
-// ── 절약 카드 ─────────────────────────────────────────────
-
-class _SavingsCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor, backgroundColor, valueColor, titleColor;
-  final String title, value;
-  final bool bordered;
-
-  const _SavingsCard({
-    required this.icon, required this.iconColor, required this.backgroundColor,
-    required this.title, required this.value, required this.valueColor,
-    required this.titleColor, this.bordered = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(20),
-        border: bordered ? Border.all(color: kPrimary.withValues(alpha: 0.2)) : null,
-        boxShadow: bordered ? null : [BoxShadow(color: kPrimary.withValues(alpha: 0.15), blurRadius: 16, offset: const Offset(0, 4))],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, color: iconColor, size: 24),
-        const SizedBox(height: 10),
-        Text(title, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: titleColor)),
-        const SizedBox(height: 4),
-        Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 22, fontWeight: FontWeight.w800, color: valueColor)),
-      ]),
-    );
-  }
-}

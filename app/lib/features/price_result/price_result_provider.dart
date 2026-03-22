@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../shared/api/price_api.dart';
 import '../../shared/api/scan_api.dart';
 import '../../shared/providers/device_provider.dart';
+import '../scan_history/scan_history_provider.dart';
 
 /// 마트 직접 입력 가격 — ManualPrice → PriceResult 간 공유
 final offlinePriceProvider =
@@ -52,6 +53,7 @@ class PriceResultNotifier
                 })
             .toList(),
       );
+      ref.invalidate(scanHistoryProvider);
       return result['scan_id'] as String?;
     } catch (e) {
       debugPrint('[ScanSave] Failed: $e');
