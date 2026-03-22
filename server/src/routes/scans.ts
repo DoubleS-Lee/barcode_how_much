@@ -145,6 +145,8 @@ router.get('/history', async (req: Request, res: Response) => {
       scan_id: scan.id.toString(),
       scan_type: scan.scanType,
       scanned_at: scan.scannedAt,
+      latitude: scan.latitude != null ? Number(scan.latitude) : null,
+      longitude: scan.longitude != null ? Number(scan.longitude) : null,
       ...(scan.scanType === 'product'
         ? {
             product: {

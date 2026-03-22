@@ -1,32 +1,37 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
 import '../../shared/services/notification_service.dart';
+import '../price_result/price_result_provider.dart';
+import '../scan_history/scan_history_provider.dart';
 
-class ManualPriceScreen extends StatefulWidget {
-  final int scanId;
-  final int? lowestOnlinePrice;
-  final String? productName;
-  const ManualPriceScreen({
-    super.key,
-    required this.scanId,
-    this.lowestOnlinePrice,
-    this.productName,
-  });
+class ManualPriceScreen extends ConsumerStatefulWidget {
+  final String barcode;
+  const ManualPriceScreen({super.key, required this.barcode});
 
   @override
-  State<ManualPriceScreen> createState() => _ManualPriceScreenState();
+  ConsumerState<ManualPriceScreen> createState() => _ManualPriceScreenState();
 }
 
-class _ManualPriceScreenState extends State<ManualPriceScreen> {
+class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
   String _input = '';
-  bool _saved = false;
+  String _promotion = '없음';
   bool _isLoading = false;
+
+  int get _unitPrice {
+    if (_input.isEmpty) return 0;
+    final price = int.parse(_input);
+    switch (_promotion) {
+      case '1+1': return (price / 2).round();
+      case '2+1': return (price * 2 / 3).round();
+      case '3+1': return (price * 3 / 4).round();
+      default: return price;
+    }
+  }
 
   void _onKey(String key) {
     if (_isLoading) return;
@@ -41,93 +46,48 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
 
   Future<void> _onSave() async {
     if (_input.isEmpty || _isLoading) return;
-    setState(() => _isLoading = true);
-    try {
-      final offlinePrice = int.parse(_input);
-      await ScanApi.postOfflinePrice(
-        scanId: widget.scanId.toString(),
-        price: offlinePrice,
-      );
-      if (mounted) {
-        setState(() { _saved = true; _isLoading = false; });
-        // 온라인이 더 싸면 알림 발송
-        final onlinePrice = widget.lowestOnlinePrice;
-        if (onlinePrice != null && onlinePrice < offlinePrice) {
-          await NotificationService.showPriceDrop(
-            productName: widget.productName ?? '스캔한 상품',
-            onlinePrice: onlinePrice,
-            offlinePrice: offlinePrice,
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('저장 실패: $e'), backgroundColor: Colors.red.shade700),
-        );
-      }
-    }
-  }
 
-  Future<void> _requestLocation() async {
-    // Windows/Web은 위치 미지원
-    if (kIsWeb || (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)) {
+    final priceData = ref.read(priceResultProvider(widget.barcode)).valueOrNull;
+    final scanId = priceData?['scan_id'] as String?;
+    if (scanId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('위치 기록은 모바일에서 지원됩니다')),
+        const SnackBar(content: Text('가격 정보를 불러오는 중이에요. 잠시 후 다시 시도해주세요.')),
       );
       return;
     }
 
+    setState(() => _isLoading = true);
     try {
-      // 권한 확인/요청
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('위치 권한이 필요합니다')),
-          );
-          return;
-        }
-      }
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('설정에서 위치 권한을 허용해주세요')),
-        );
-        return;
-      }
+      final offlinePrice = _unitPrice;
+      await ScanApi.postOfflinePrice(scanId: scanId, price: offlinePrice);
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      );
-
-      // 주소 역지오코딩
-      String storeHint = '현재 위치';
-      try {
-        final placemarks = await placemarkFromCoordinates(
-          position.latitude, position.longitude,
-        );
-        if (placemarks.isNotEmpty) {
-          final p = placemarks.first;
-          final parts = [p.thoroughfare, p.subLocality, p.locality]
-              .where((s) => s != null && s.isNotEmpty)
-              .toList();
-          storeHint = parts.take(2).join(' ');
-        }
-      } catch (_) {}
-
-      // 오프라인 가격에 위치 정보 업데이트 (store_hint 업데이트는 별도 API가 없으므로 로컬 표시)
-      if (mounted) {
-        setState(() => _saved = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('📍 위치 기록 완료: $storeHint')),
+      // 온라인이 더 싸면 알림
+      final lowestOnlinePrice = priceData?['lowest_price'] as int?;
+      if (lowestOnlinePrice != null && lowestOnlinePrice < offlinePrice) {
+        final productName = priceData?['product_name'] as String? ?? '스캔한 상품';
+        await NotificationService.showPriceDrop(
+          productName: productName,
+          onlinePrice: lowestOnlinePrice,
+          offlinePrice: offlinePrice,
         );
       }
+
+      // 마트 입력가를 PriceResult 화면과 공유
+      ref.read(offlinePriceProvider(widget.barcode).notifier).state = offlinePrice;
+      // 가격 이력 그래프 갱신
+      ref.invalidate(priceHistoryProvider(widget.barcode));
+
+      if (mounted) context.pushReplacement('/price-result/${widget.barcode}');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('위치를 가져올 수 없어요: $e')),
-      );
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('저장 실패: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
     }
   }
 
@@ -139,6 +99,9 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final priceAsync = ref.watch(priceResultProvider(widget.barcode));
+    final productName = priceAsync.valueOrNull?['product_name'] as String?;
+
     return Scaffold(
       backgroundColor: kBackground,
       appBar: AppBar(
@@ -150,13 +113,64 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
             color: kPrimaryDark,
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => context.pushReplacement('/price-result/${widget.barcode}'),
+            child: Text(
+              '건너뛰기',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: kOnSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // 가격 표시 영역
+          // 상품명 표시
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: const BoxDecoration(
+              color: kSurface,
+              border: Border(bottom: BorderSide(color: kOutlineVariant, width: 1)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.inventory_2_outlined,
+                    size: 16, color: kOnSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    productName ??
+                        (priceAsync.isLoading ? '상품 정보 조회 중...' : '알 수 없는 상품'),
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color:
+                          productName != null ? kPrimaryDark : kOnSurfaceVariant,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (priceAsync.isLoading)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: kPrimary),
+                  ),
+              ],
+            ),
+          ),
+
+          // 가격 표시 + 프로모션 선택
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
             decoration: const BoxDecoration(
               color: kSurface,
               border: Border(bottom: BorderSide(color: kOutlineVariant, width: 1)),
@@ -172,7 +186,7 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
                     letterSpacing: 0.3,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -181,9 +195,11 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
                     Text(
                       _displayPrice,
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 48,
+                        fontSize: 44,
                         fontWeight: FontWeight.w900,
-                        color: _input.isEmpty ? kOutlineVariant : kPrimaryDark,
+                        color: _input.isEmpty
+                            ? kOutlineVariant
+                            : kOnSurface.withValues(alpha: 0.6),
                         letterSpacing: -2,
                       ),
                     ),
@@ -191,80 +207,97 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
                     Text(
                       '원',
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 22,
+                        fontSize: 20,
                         fontWeight: FontWeight.w700,
-                        color: _input.isEmpty ? kOutlineVariant : kOnSurface,
+                        color: _input.isEmpty
+                            ? kOutlineVariant
+                            : kOnSurface.withValues(alpha: 0.5),
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-
-          // 저장 후 위치 제안 배너
-          if (_saved)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: kPrimary.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.location_on_outlined,
-                      color: kPrimary, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '지금 마트 위치도 같이 기록할까요?',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        color: kPrimaryDark,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => setState(() => _saved = false),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Text(
-                      '괜찮아요',
-                      style: GoogleFonts.inter(
-                          fontSize: 12, color: kOnSurfaceVariant),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  SizedBox(
-                    height: 34,
-                    child: ElevatedButton(
-                      onPressed: _requestLocation,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                // 행사 선택 버튼
+                const SizedBox(height: 14),
+                Row(
+                  children: ['없음', '1+1', '2+1', '3+1'].map((promo) {
+                    final selected = _promotion == promo;
+                    return Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _promotion = promo),
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          decoration: BoxDecoration(
+                            color: selected ? kPrimary : Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: selected ? kPrimary : Colors.grey.shade200,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              promo,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color:
+                                    selected ? Colors.white : kOnSurfaceVariant,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      child: Text(
-                        '기록하기',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                    );
+                  }).toList(),
+                ),
+                // 개당 가격 (행사 선택 시)
+                if (_promotion != '없음' && _input.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: kPrimary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          '개당 가격  ',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: kPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
+                        Text(
+                          NumberFormat('#,###').format(_unitPrice),
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            color: kPrimary,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '원',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: kPrimary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
+          ),
 
           // 키패드
           Expanded(
@@ -288,11 +321,15 @@ class _ManualPriceScreenState extends State<ManualPriceScreen> {
                   ),
                   _KeyButton(label: '0', onTap: () => _onKey('0')),
                   _KeyButton(
-                    label: '저장',
+                    label: _promotion != '없음' && _input.isNotEmpty
+                        ? '${NumberFormat('#,###').format(_unitPrice)}원\n저장'
+                        : '저장',
                     onTap: _onSave,
-                    backgroundColor: (_input.isEmpty || _isLoading) ? kOutlineVariant : kPrimary,
+                    backgroundColor:
+                        (_input.isEmpty || _isLoading) ? kOutlineVariant : kPrimary,
                     textColor: Colors.white,
-                    fontSize: 18,
+                    fontSize:
+                        _promotion != '없음' && _input.isNotEmpty ? 13 : 18,
                     isLoading: _isLoading,
                   ),
                 ],
@@ -360,10 +397,12 @@ class _KeyButton extends StatelessWidget {
                     ? Icon(Icons.backspace_outlined, color: fg, size: 22)
                     : Text(
                         label,
+                        textAlign: TextAlign.center,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: fontSize,
                           fontWeight: FontWeight.w700,
                           color: fg,
+                          height: 1.3,
                         ),
                       ),
           ),

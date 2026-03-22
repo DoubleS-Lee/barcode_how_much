@@ -8,11 +8,25 @@ import '../../shared/widgets/app_bottom_nav.dart';
 import 'scan_history_provider.dart';
 import 'price_graph_widget.dart';
 
-class ScanHistoryScreen extends ConsumerWidget {
+class ScanHistoryScreen extends ConsumerStatefulWidget {
   const ScanHistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ScanHistoryScreen> createState() => _ScanHistoryScreenState();
+}
+
+class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final historyAsync = ref.watch(scanHistoryProvider);
 
     return Scaffold(
@@ -36,25 +50,63 @@ class ScanHistoryScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: historyAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.cloud_off_rounded, size: 56, color: Colors.grey.shade300),
-              const SizedBox(height: 16),
-              Text('이력을 불러오지 못했어요',
-                style: GoogleFonts.inter(fontSize: 15, color: kOnSurfaceVariant)),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: () => ref.invalidate(scanHistoryProvider),
-                child: const Text('다시 시도'),
+      body: Column(
+        children: [
+          // ── 검색바 ──
+          Container(
+            color: kSurface,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v.trim()),
+              decoration: InputDecoration(
+                hintText: '상품명으로 검색',
+                hintStyle: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant),
+                prefixIcon: const Icon(Icons.search, color: kOnSurfaceVariant, size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18, color: kOnSurfaceVariant),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: kBackground,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
-            ],
+              style: GoogleFonts.inter(fontSize: 13),
+            ),
           ),
-        ),
-        data: (history) => _HistoryBody(history: history),
+          // ── 히스토리 바디 ──
+          Expanded(
+            child: historyAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_off_rounded, size: 56, color: Colors.grey.shade300),
+                    const SizedBox(height: 16),
+                    Text('이력을 불러오지 못했어요',
+                      style: GoogleFonts.inter(fontSize: 15, color: kOnSurfaceVariant)),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () => ref.invalidate(scanHistoryProvider),
+                      child: const Text('다시 시도'),
+                    ),
+                  ],
+                ),
+              ),
+              data: (history) => _HistoryBody(history: history, searchQuery: _searchQuery),
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 1),
     );
@@ -93,7 +145,8 @@ class _ProductGroup {
 
 class _HistoryBody extends ConsumerWidget {
   final List<Map<String, dynamic>> history;
-  const _HistoryBody({required this.history});
+  final String searchQuery;
+  const _HistoryBody({required this.history, this.searchQuery = ''});
 
   bool _isProduct(String scanType) => scanType == 'product' || scanType == 'isbn';
 
@@ -136,8 +189,17 @@ class _HistoryBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nf = NumberFormat('#,###');
-    final productGroups = _groupProducts(history);
-    final nonProductItems = history.where((i) => !_isProduct(i['scan_type'] as String)).toList();
+    final allProductGroups = _groupProducts(history);
+    // 검색 필터 적용 (상품명 대소문자 무시)
+    final productGroups = searchQuery.isEmpty
+        ? allProductGroups
+        : allProductGroups
+            .where((g) =>
+                g.name.toLowerCase().contains(searchQuery.toLowerCase()))
+            .toList();
+    final nonProductItems = searchQuery.isNotEmpty
+        ? <Map<String, dynamic>>[]
+        : history.where((i) => !_isProduct(i['scan_type'] as String)).toList();
 
     final totalItems = productGroups.length + nonProductItems.length;
 
@@ -152,10 +214,23 @@ class _HistoryBody extends ConsumerWidget {
                       padding: const EdgeInsets.only(top: 80),
                       child: Column(
                         children: [
-                          Icon(Icons.history, size: 64, color: Colors.grey.shade200),
+                          Icon(
+                            searchQuery.isNotEmpty ? Icons.search_off : Icons.history,
+                            size: 64,
+                            color: Colors.grey.shade200,
+                          ),
                           const SizedBox(height: 16),
-                          Text('아직 스캔 이력이 없어요',
-                            style: GoogleFonts.inter(fontSize: 15, color: kOnSurfaceVariant)),
+                          Text(
+                            searchQuery.isNotEmpty ? '검색 결과가 없어요' : '아직 스캔 이력이 없어요',
+                            style: GoogleFonts.inter(fontSize: 15, color: kOnSurfaceVariant),
+                          ),
+                          if (searchQuery.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              '다른 상품명으로 검색해보세요',
+                              style: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant),
+                            ),
+                          ],
                         ],
                       ),
                     ),

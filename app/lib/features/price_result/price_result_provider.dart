@@ -4,6 +4,10 @@ import '../../shared/api/price_api.dart';
 import '../../shared/api/scan_api.dart';
 import '../../shared/providers/device_provider.dart';
 
+/// 마트 직접 입력 가격 — ManualPrice → PriceResult 간 공유
+final offlinePriceProvider =
+    StateProvider.family<int?, String>((ref, barcode) => null);
+
 /// 바코드별 가격 조회 — GET /api/v1/price?barcode=
 final priceProvider =
     FutureProvider.family<Map<String, dynamic>, String>((ref, barcode) async {
@@ -19,21 +23,24 @@ class PriceResultNotifier
   Future<Map<String, dynamic>> build(String barcode) async {
     final data = await PriceApi.getPrice(barcode);
 
-    // 첫 로드 시 스캔 이벤트를 서버에 저장 (fire-and-forget)
+    // 첫 로드 시 스캔 이벤트 저장 후 scan_id를 data에 주입
     if (!_scanSaved) {
       _scanSaved = true;
-      _saveScan(barcode, data);
+      final scanId = await _saveScan(barcode, data);
+      if (scanId != null) {
+        return {...data, 'scan_id': scanId};
+      }
     }
 
     return data;
   }
 
-  Future<void> _saveScan(
+  Future<String?> _saveScan(
       String barcode, Map<String, dynamic> priceData) async {
     try {
       final deviceUuid = await ref.read(deviceUuidProvider.future);
       final prices = (priceData['prices'] as List).cast<Map>();
-      await ScanApi.postScan(
+      final result = await ScanApi.postScan(
         deviceUuid: deviceUuid,
         scanType: 'product',
         barcode: barcode,
@@ -45,9 +52,10 @@ class PriceResultNotifier
                 })
             .toList(),
       );
+      return result['scan_id'] as String?;
     } catch (e) {
-      // 저장 실패 시 사용자에게 영향 없음 — 로그만 출력
       debugPrint('[ScanSave] Failed: $e');
+      return null;
     }
   }
 

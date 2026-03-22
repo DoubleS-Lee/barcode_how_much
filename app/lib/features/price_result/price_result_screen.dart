@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,8 +6,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../shared/api/scan_api.dart';
 import '../../shared/services/share_service.dart';
 import '../../shared/widgets/admob_banner.dart';
+import '../scan_history/price_graph_widget.dart';
+import '../scan_history/scan_history_provider.dart';
 import 'price_result_provider.dart';
 import 'recommend_provider.dart';
 
@@ -57,10 +61,21 @@ class PriceResultScreen extends ConsumerWidget {
       ),
       body: priceAsync.when(
         loading: () => const _PriceLoadingSkeleton(),
-        error: (e, _) => _PriceErrorView(
-          message: _friendlyError(e),
-          onRetry: () => ref.invalidate(priceResultProvider(barcode)),
-        ),
+        error: (e, _) {
+          if (_is404(e)) {
+            return _ProductNotFoundView(
+              barcode: barcode,
+              onNameSubmitted: (name) async {
+                await ScanApi.patchProductName(barcode: barcode, name: name);
+                ref.invalidate(priceResultProvider(barcode));
+              },
+            );
+          }
+          return _PriceErrorView(
+            message: _friendlyError(e),
+            onRetry: () => ref.invalidate(priceResultProvider(barcode)),
+          );
+        },
         data: (data) => _PriceResultBody(barcode: barcode, data: data),
       ),
     );
@@ -95,6 +110,11 @@ class PriceResultScreen extends ConsumerWidget {
     }
   }
 
+  bool _is404(Object e) {
+    if (e is DioException) return e.response?.statusCode == 404;
+    return e.toString().contains('404');
+  }
+
   String _friendlyError(Object e) {
     final msg = e.toString();
     if (msg.contains('timeout') || msg.contains('Timeout')) {
@@ -103,7 +123,6 @@ class PriceResultScreen extends ConsumerWidget {
     if (msg.contains('connection') || msg.contains('Connection')) {
       return '서버에 연결할 수 없어요.\n잠시 후 다시 시도해주세요.';
     }
-    if (msg.contains('404')) return '등록되지 않은 상품입니다.';
     return '가격 정보를 불러오지 못했어요.';
   }
 }
@@ -113,23 +132,52 @@ class _PriceResultBody extends ConsumerWidget {
   final Map<String, dynamic> data;
   const _PriceResultBody({required this.barcode, required this.data});
 
+  String _platformLabel(String platform) =>
+      platform == 'coupang' ? '쿠팡' : '네이버 쇼핑';
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nf = NumberFormat('#,###');
     final prices = (data['prices'] as List).cast<Map>();
     final lowestPlatform = data['lowest_platform'] as String;
     final productName = (data['product_name'] as String?) ?? '바코드: $barcode';
+    final lowestPrice = (data['lowest_price'] as num?)?.toInt() ?? 0;
+    final cacheAge = (data['cache_age_minutes'] as num?)?.toInt() ?? 0;
+
+    final offlinePrice = ref.watch(offlinePriceProvider(barcode));
+    final priceHistoryAsync = ref.watch(priceHistoryProvider(barcode));
     final recommendAsync = ref.watch(recommendProvider(
       RecommendArgs(barcode: barcode, productName: productName),
     ));
-    final cacheAge = (data['cache_age_minutes'] as num?)?.toInt() ?? 0;
 
     final lowest = prices.firstWhere((p) => p['platform'] == lowestPlatform,
         orElse: () => prices.first);
-    final others = prices.where((p) => p['platform'] != lowestPlatform).toList();
+    final others =
+        prices.where((p) => p['platform'] != lowestPlatform).toList();
 
-    String platformLabel(String platform) =>
-        platform == 'coupang' ? '쿠팡 (Coupang)' : '네이버 쇼핑 (Naver)';
+    // ── 동적 헤드라인 ──────────────────────────────────────
+    String badgeText;
+    String headlineText;
+    Color headlineColor = kPrimaryDark;
+
+    if (offlinePrice != null) {
+      badgeText = 'Price Compared';
+      if (offlinePrice > lowestPrice) {
+        final pct = ((offlinePrice - lowestPrice) / offlinePrice * 100).round();
+        headlineText = '온라인이 마트보다\n$pct% 더 저렴해요!';
+        headlineColor = const Color(0xFF16A34A);
+      } else if (offlinePrice < lowestPrice) {
+        final pct =
+            ((lowestPrice - offlinePrice) / lowestPrice * 100).round();
+        headlineText = '마트가 온라인보다\n$pct% 더 저렴해요';
+        headlineColor = kAmber;
+      } else {
+        headlineText = '마트와 온라인\n가격이 같아요';
+      }
+    } else {
+      badgeText = 'Price Found';
+      headlineText = '이 상품,\n온라인 최저가는?';
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -144,7 +192,7 @@ class _PriceResultBody extends ConsumerWidget {
               borderRadius: BorderRadius.circular(6),
             ),
             child: Text(
-              'Price Found',
+              badgeText,
               style: GoogleFonts.inter(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
@@ -155,11 +203,11 @@ class _PriceResultBody extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            '이 상품, 온라인이\n가장 저렴합니다',
+            headlineText,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 26,
               fontWeight: FontWeight.w800,
-              color: kPrimaryDark,
+              color: headlineColor,
               height: 1.25,
               letterSpacing: -0.5,
             ),
@@ -188,19 +236,19 @@ class _PriceResultBody extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Scanned Item',
+                        '스캔한 상품',
                         style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           color: Colors.grey.shade400,
-                          letterSpacing: 1,
+                          letterSpacing: 0.5,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
                         productName,
                         style: GoogleFonts.plusJakartaSans(
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: kPrimaryDark,
                         ),
@@ -218,9 +266,54 @@ class _PriceResultBody extends ConsumerWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          // 최저가 카드 (hero)
+          // ── 비교 결과 카드 (마트 가격 입력 시) ────────────
+          if (offlinePrice != null) ...[
+            _ComparisonCard(
+              offlinePrice: offlinePrice,
+              onlinePrice: lowestPrice,
+              lowestPlatform: lowestPlatform,
+              nf: nf,
+            ),
+            const SizedBox(height: 8),
+            // 가격 수정 버튼 (작게)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.edit_outlined, size: 14),
+                label: Text('마트 가격 수정',
+                    style: GoogleFonts.inter(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  foregroundColor: kOnSurfaceVariant,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => context.push('/manual-price/$barcode'),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            // 마트 가격 미입력 시 입력 버튼
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.storefront_outlined, size: 18),
+                label: Text(
+                  '마트 현재 가격 직접 입력',
+                  style:
+                      GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                ),
+                onPressed: () => context.push('/manual-price/$barcode'),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // ── 온라인 최저가 카드 (hero) ──────────────────────
           Container(
             decoration: BoxDecoration(
               color: kSurface,
@@ -256,7 +349,7 @@ class _PriceResultBody extends ConsumerWidget {
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            platformLabel(lowestPlatform),
+                            _platformLabel(lowestPlatform),
                             style: GoogleFonts.inter(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -301,11 +394,16 @@ class _PriceResultBody extends ConsumerWidget {
                             if (url != null && url.isNotEmpty) {
                               final uri = Uri.tryParse(url);
                               if (uri != null && await canLaunchUrl(uri)) {
-                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                await launchUrl(
+                                    uri,
+                                    mode:
+                                        LaunchMode.externalApplication);
                               }
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('${platformLabel(lowestPlatform)} 앱으로 이동합니다')),
+                                SnackBar(
+                                    content: Text(
+                                        '${_platformLabel(lowestPlatform)} 앱으로 이동합니다')),
                               );
                             }
                           },
@@ -345,7 +443,7 @@ class _PriceResultBody extends ConsumerWidget {
                         const Icon(Icons.stars, color: Colors.white, size: 13),
                         const SizedBox(width: 4),
                         Text(
-                          '최저가',
+                          '온라인 최저가',
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -398,7 +496,7 @@ class _PriceResultBody extends ConsumerWidget {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              platformLabel(p['platform'] as String),
+                              _platformLabel(p['platform'] as String),
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -456,28 +554,44 @@ class _PriceResultBody extends ConsumerWidget {
             );
           }),
 
-          // 마트 직접 입력
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              label: Text(
-                '마트 현재 가격 직접 입력',
-                style: GoogleFonts.plusJakartaSans(
-                    fontWeight: FontWeight.w600),
-              ),
-              onPressed: () {
-                final scanIdStr = (data['scan_id'] ?? '0').toString();
-                final lowestPrice = data['lowest_price'] as int? ?? 0;
-                final name = Uri.encodeComponent(productName);
-                context.push('/manual-price/$scanIdStr?price=$lowestPrice&name=$name');
-              },
+          // ── 내 가격 이력 그래프 ────────────────────────────
+          const SizedBox(height: 8),
+          priceHistoryAsync.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2)),
             ),
+            error: (_, __) => const SizedBox.shrink(),
+            data: (history) {
+              if (history.isEmpty) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '내 가격 이력',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: kPrimaryDark,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: kSurface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.grey.shade100),
+                    ),
+                    child: PriceGraphWidget(priceHistory: history),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 16),
 
-          // AdMob 배너 (Android/iOS: 실제 광고, Windows: 업셀 플레이스홀더)
+          // AdMob 배너
           const AdmobBanner(),
           const SizedBox(height: 24),
 
@@ -744,6 +858,310 @@ class _RecommendCard extends StatelessWidget {
     );
   }
 }
+
+// ── 마트 vs 온라인 비교 카드 ─────────────────────────────────────────────
+
+class _ComparisonCard extends StatelessWidget {
+  final int offlinePrice;
+  final int onlinePrice;
+  final String lowestPlatform;
+  final NumberFormat nf;
+
+  const _ComparisonCard({
+    required this.offlinePrice,
+    required this.onlinePrice,
+    required this.lowestPlatform,
+    required this.nf,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = offlinePrice - onlinePrice;
+    final onlineCheaper = diff > 0;
+    final equal = diff == 0;
+
+    final accentColor = equal
+        ? kOnSurfaceVariant
+        : onlineCheaper
+            ? const Color(0xFF16A34A)
+            : kAmber;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: kSurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accentColor.withValues(alpha: 0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // 절약/추가 뱃지
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  equal
+                      ? Icons.compare_arrows
+                      : onlineCheaper
+                          ? Icons.savings_outlined
+                          : Icons.storefront_outlined,
+                  size: 14,
+                  color: accentColor,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  equal
+                      ? '마트 = 온라인'
+                      : onlineCheaper
+                          ? '온라인이 ${nf.format(diff)}원 더 저렴'
+                          : '마트가 ${nf.format(-diff)}원 더 저렴',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: accentColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 가격 비교 행
+          Row(
+            children: [
+              // 마트 가격
+              Expanded(
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.storefront_outlined,
+                            size: 14, color: kAmber),
+                        const SizedBox(width: 4),
+                        Text('마트',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: kAmber)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${nf.format(offlinePrice)}원',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: onlineCheaper
+                            ? kOnSurface.withValues(alpha: 0.5)
+                            : kAmber,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 화살표
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  equal
+                      ? Icons.compare_arrows
+                      : onlineCheaper
+                          ? Icons.arrow_forward
+                          : Icons.arrow_back,
+                  size: 16,
+                  color: kOnSurfaceVariant,
+                ),
+              ),
+              // 온라인 가격
+              Expanded(
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.shopping_cart_outlined,
+                            size: 14, color: kPrimary),
+                        const SizedBox(width: 4),
+                        Text(
+                          lowestPlatform == 'coupang' ? '쿠팡' : '네이버',
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: kPrimary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${nf.format(onlinePrice)}원',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: onlineCheaper
+                            ? const Color(0xFF16A34A)
+                            : kOnSurface.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Scenario 2: 바코드로 상품을 못 찾았을 때 ─────────────────────────────
+
+class _ProductNotFoundView extends StatefulWidget {
+  final String barcode;
+  final Future<void> Function(String name) onNameSubmitted;
+  const _ProductNotFoundView({required this.barcode, required this.onNameSubmitted});
+
+  @override
+  State<_ProductNotFoundView> createState() => _ProductNotFoundViewState();
+}
+
+class _ProductNotFoundViewState extends State<_ProductNotFoundView> {
+  final _controller = TextEditingController();
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final name = _controller.text.trim();
+    if (name.isEmpty || _isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      await widget.onNameSubmitted(name);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('검색 중 오류가 발생했어요. 다시 시도해주세요.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.search_off_rounded,
+                  size: 36, color: Colors.orange.shade400),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '바코드로 상품을 찾지 못했어요',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: kPrimaryDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '상품명을 직접 입력하면\n온라인 최저가를 조회해드려요',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: kOnSurfaceVariant,
+                height: 1.6,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                hintText: '예) 농심 신라면 120g',
+                hintStyle: GoogleFonts.inter(color: Colors.grey.shade400),
+                filled: true,
+                fillColor: Colors.grey.shade50,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: kPrimary, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 14),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _submit,
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        '온라인 가격 검색',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _PriceLoadingSkeleton extends StatelessWidget {
   const _PriceLoadingSkeleton();

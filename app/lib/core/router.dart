@@ -5,7 +5,7 @@ import '../features/scanner/scanner_screen.dart';
 import '../features/price_result/price_result_screen.dart';
 import '../features/manual_price/manual_price_screen.dart';
 import '../features/scan_history/scan_history_screen.dart';
-import '../features/statistics/statistics_screen.dart';
+import '../features/community/community_screen.dart';
 import '../features/settings/settings_screen.dart';
 
 final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
@@ -20,15 +20,13 @@ final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
             PriceResultScreen(barcode: state.pathParameters['barcode']!),
       ),
       GoRoute(
-        path: '/manual-price/:scanId',
+        path: '/manual-price/:barcode',
         builder: (_, state) => ManualPriceScreen(
-          scanId: int.tryParse(state.pathParameters['scanId']!) ?? 0,
-          lowestOnlinePrice: int.tryParse(state.uri.queryParameters['price'] ?? ''),
-          productName: state.uri.queryParameters['name'],
+          barcode: state.pathParameters['barcode']!,
         ),
       ),
       GoRoute(path: '/history', builder: (_, __) => const ScanHistoryScreen()),
-      GoRoute(path: '/statistics', builder: (_, __) => const StatisticsScreen()),
+      GoRoute(path: '/community', builder: (_, __) => const CommunityScreen()),
       GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
     ],
   );

@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import priceRouter from './routes/price';
 import scansRouter from './routes/scans';
 import recommendRouter from './routes/recommend';
+import postsRouter from './routes/posts';
 import { errorHandler } from './middleware/error';
 
 dotenv.config();
@@ -22,6 +23,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date() })
 app.use('/api/v1/price', priceRouter);
 app.use('/api/v1/scans', scansRouter);
 app.use('/api/v1/recommend', recommendRouter);
+app.use('/api/v1/posts', postsRouter);
 
 app.use(errorHandler);
 
