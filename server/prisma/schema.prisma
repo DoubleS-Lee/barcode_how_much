@@ -72,6 +72,7 @@ model OfflinePrice {
   scan      Scan     @relation(fields: [scanId], references: [id])
   price     Int
   storeHint String?  @map("store_hint") @db.VarChar(200)
+  memo      String?  @map("memo") @db.VarChar(500)
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("offline_prices")

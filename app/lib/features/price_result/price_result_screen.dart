@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../shared/api/scan_api.dart';
 import '../../shared/services/share_service.dart';
 import '../../shared/widgets/admob_banner.dart';
+import '../../shared/widgets/app_bottom_nav.dart';
 import '../scan_history/price_graph_widget.dart';
 import '../scan_history/scan_history_provider.dart';
 import 'price_result_provider.dart';
@@ -59,6 +60,7 @@ class PriceResultScreen extends ConsumerWidget {
           ),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: 0),
       body: priceAsync.when(
         loading: () => const _PriceLoadingSkeleton(),
         error: (e, _) {

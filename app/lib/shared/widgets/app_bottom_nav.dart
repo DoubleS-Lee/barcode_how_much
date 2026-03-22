@@ -10,7 +10,7 @@ class AppBottomNav extends StatelessWidget {
 
   static const _items = [
     (icon: Icons.center_focus_strong, label: '스캔', route: '/scanner'),
-    (icon: Icons.receipt_long, label: '상품 기록', route: '/history'),
+    (icon: Icons.receipt_long, label: '스캔 기록', route: '/history'),
     (icon: Icons.campaign_outlined, label: '공유 게시판', route: '/community'),
     (icon: Icons.settings, label: '설정', route: '/settings'),
   ];

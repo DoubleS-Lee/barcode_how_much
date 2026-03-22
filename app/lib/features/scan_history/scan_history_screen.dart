@@ -1,12 +1,20 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
+import '../price_result/recommend_provider.dart';
 import 'scan_history_provider.dart';
 import 'price_graph_widget.dart';
+
+// 오프라인 가격 즉각 반영용 (서버 재요청 전에도 배너 바로 업데이트)
+final _liveOfflinePriceProvider = StateProvider.family<int?, String>((ref, barcode) => null);
 
 class ScanHistoryScreen extends ConsumerStatefulWidget {
   const ScanHistoryScreen({super.key});
@@ -83,6 +91,11 @@ class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen> {
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
+          // ── 배너 광고 ──
+          if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS))
+            const _BannerAdWidget(),
+
           // ── 히스토리 바디 ──
           Expanded(
             child: historyAsync.when(
@@ -130,6 +143,14 @@ class _ProductGroup {
 
   int? get latestOnlinePrice => scans.first['lowest_online_price'] as int?;
   DateTime get latestScannedAt => DateTime.parse(scans.first['scanned_at'] as String);
+
+  int? get latestOfflinePrice {
+    for (final scan in scans) {
+      final p = scan['offline_price'] as int?;
+      if (p != null) return p;
+    }
+    return null;
+  }
 
   int? get allTimeLowestPrice {
     final prices = scans
@@ -470,6 +491,55 @@ class _GroupedProductCard extends StatelessWidget {
             ]),
           ),
           children: [
+            // 절약 요약 배너 (즉각 반영: 로컬 편집값 우선, 없으면 서버 데이터)
+            Builder(builder: (context) {
+              final latestOnline = group.latestOnlinePrice;
+              final liveOffline = ref.watch(_liveOfflinePriceProvider(group.barcode));
+              final latestOffline = liveOffline ?? group.latestOfflinePrice;
+              if (latestOnline == null || latestOffline == null) return const SizedBox.shrink();
+              final diff = latestOffline - latestOnline;
+              if (diff == 0) return const SizedBox.shrink();
+              final isOnlineCheaper = diff > 0;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isOnlineCheaper ? Colors.green.shade50 : Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: isOnlineCheaper ? Colors.green.shade100 : Colors.orange.shade100),
+                  ),
+                  child: Row(children: [
+                    Icon(
+                      isOnlineCheaper ? Icons.savings_outlined : Icons.store_outlined,
+                      size: 16,
+                      color: isOnlineCheaper ? Colors.green.shade600 : Colors.orange.shade700,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      isOnlineCheaper ? '온라인이 오프라인보다 ' : '오프라인이 온라인보다 ',
+                      style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: isOnlineCheaper
+                              ? Colors.green.shade700
+                              : Colors.orange.shade700),
+                    ),
+                    Text(
+                      '${nf.format(diff.abs())}원 저렴',
+                      style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: isOnlineCheaper
+                              ? Colors.green.shade700
+                              : Colors.orange.shade700),
+                    ),
+                  ]),
+                ),
+              );
+            }),
+
             // 가격 추이 그래프
             priceHistoryAsync.when(
               loading: () => const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
@@ -489,10 +559,13 @@ class _GroupedProductCard extends StatelessWidget {
                   Text('스캔 이력',
                     style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: kOnSurfaceVariant)),
                   const SizedBox(height: 8),
-                  ...group.scans.map((scan) => _ScanHistoryRow(scan: scan, nf: nf)),
+                  ...group.scans.map((scan) => _ScanHistoryRow(scan: scan, nf: nf, barcode: group.barcode)),
                 ],
               ),
             ),
+
+            // 유사 상품 추천
+            _HistoryRecommendSection(barcode: group.barcode, productName: group.name, nf: nf, ref: ref),
           ],
         ),
       ),
@@ -502,47 +575,27 @@ class _GroupedProductCard extends StatelessWidget {
 
 // ── 개별 스캔 행 ──────────────────────────────────────────
 
-class _ScanHistoryRow extends StatelessWidget {
+class _ScanHistoryRow extends ConsumerStatefulWidget {
   final Map<String, dynamic> scan;
   final NumberFormat nf;
-  const _ScanHistoryRow({required this.scan, required this.nf});
+  final String barcode;
+  const _ScanHistoryRow({required this.scan, required this.nf, required this.barcode});
 
   @override
-  Widget build(BuildContext context) {
-    final scannedAt = DateTime.parse(scan['scanned_at'] as String).toLocal();
-    final dateLabel = DateFormat('yy.MM.dd HH:mm').format(scannedAt);
-    final onlinePrice = scan['lowest_online_price'] as int?;
-    final offlinePrice = scan['offline_price'] as int?;
-    final platform = scan['lowest_online_platform'] as String?;
+  ConsumerState<_ScanHistoryRow> createState() => _ScanHistoryRowState();
+}
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(children: [
-        Container(
-          width: 6, height: 6,
-          margin: const EdgeInsets.only(right: 10, top: 2),
-          decoration: BoxDecoration(color: kOutlineVariant, shape: BoxShape.circle),
-        ),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(dateLabel, style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant)),
-            if (onlinePrice != null || offlinePrice != null)
-              Wrap(spacing: 8, children: [
-                if (onlinePrice != null)
-                  Text(
-                    '${_platformLabel(platform)} ${nf.format(onlinePrice)}원',
-                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: kPrimary),
-                  ),
-                if (offlinePrice != null)
-                  Text(
-                    '마트 ${nf.format(offlinePrice)}원',
-                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: kAmber),
-                  ),
-              ]),
-          ]),
-        ),
-      ]),
-    );
+class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
+  late int? _offlinePrice;
+  late String? _storeHint;
+  late String? _memo;
+
+  @override
+  void initState() {
+    super.initState();
+    _offlinePrice = widget.scan['offline_price'] as int?;
+    _storeHint = widget.scan['store_hint'] as String?;
+    _memo = widget.scan['memo'] as String?;
   }
 
   String _platformLabel(String? platform) => switch (platform) {
@@ -550,6 +603,214 @@ class _ScanHistoryRow extends StatelessWidget {
     'naver' => '네이버',
     _ => '온라인',
   };
+
+  Future<void> _showEditDialog() async {
+    final priceCtrl = TextEditingController(
+        text: _offlinePrice != null ? _offlinePrice.toString() : '');
+    final storeCtrl = TextEditingController(text: _storeHint ?? '');
+    final memoCtrl = TextEditingController(text: _memo ?? '');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('오프라인 정보 수정',
+            style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: priceCtrl,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: '오프라인 가격 (원)',
+              hintText: '예: 12900',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            style: GoogleFonts.inter(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: storeCtrl,
+            decoration: InputDecoration(
+              labelText: '장소',
+              hintText: '예: 이마트 왕십리점',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              prefixIcon: const Icon(Icons.place_outlined, size: 18),
+            ),
+            style: GoogleFonts.inter(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: memoCtrl,
+            decoration: InputDecoration(
+              labelText: '메모',
+              hintText: '예: 1+1 행사 중',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              prefixIcon: const Icon(Icons.notes, size: 18),
+            ),
+            style: GoogleFonts.inter(fontSize: 14),
+            maxLength: 100,
+            buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('저장', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final newPrice = int.tryParse(priceCtrl.text.trim());
+    final newStore = storeCtrl.text.trim().isEmpty ? null : storeCtrl.text.trim();
+    final newMemo = memoCtrl.text.trim().isEmpty ? null : memoCtrl.text.trim();
+
+    if (newPrice == null && _offlinePrice == null) return;
+
+    final scanId = widget.scan['scan_id'] as String?;
+    if (scanId == null) return;
+
+    try {
+      await ScanApi.patchOfflinePrice(
+        scanId: scanId,
+        price: newPrice ?? _offlinePrice,
+        storeHint: newStore,
+        memo: newMemo,
+      );
+      setState(() {
+        if (newPrice != null) _offlinePrice = newPrice;
+        _storeHint = newStore;
+        _memo = newMemo;
+      });
+      // 배너 즉각 반영 (서버 재요청 완료 전에도 바로 업데이트)
+      ref.read(_liveOfflinePriceProvider(widget.barcode).notifier).state =
+          newPrice ?? _offlinePrice;
+      ref.invalidate(scanHistoryProvider);
+      ref.invalidate(priceHistoryProvider(widget.barcode));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('저장 실패: $e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scan = widget.scan;
+    final nf = widget.nf;
+    final scannedAt = DateTime.parse(scan['scanned_at'] as String).toLocal();
+    final dateLabel = DateFormat('yy.MM.dd HH:mm').format(scannedAt);
+    final onlinePrice = scan['lowest_online_price'] as int?;
+    final platform = scan['lowest_online_platform'] as String?;
+
+    // 온/오프 비교
+    int? diff;
+    if (onlinePrice != null && _offlinePrice != null) {
+      diff = _offlinePrice! - onlinePrice; // 양수 = 오프라인 더 비쌈(온라인 유리), 음수 = 오프라인 더 쌈
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 6, height: 6,
+          margin: const EdgeInsets.only(right: 10, top: 5),
+          decoration: BoxDecoration(color: kOutlineVariant, shape: BoxShape.circle),
+        ),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // 날짜 + 수정 버튼
+            Row(children: [
+              Text(dateLabel, style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant)),
+              const Spacer(),
+              GestureDetector(
+                onTap: _showEditDialog,
+                child: Icon(Icons.edit_outlined, size: 14, color: kOnSurfaceVariant.withValues(alpha: 0.5)),
+              ),
+            ]),
+            const SizedBox(height: 3),
+
+            // 온라인/오프라인 가격
+            if (onlinePrice != null || _offlinePrice != null)
+              Wrap(spacing: 8, runSpacing: 2, children: [
+                if (onlinePrice != null)
+                  Text(
+                    '${_platformLabel(platform)} ${nf.format(onlinePrice)}원',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: kPrimary),
+                  ),
+                if (_offlinePrice != null)
+                  Text(
+                    '오프라인 ${nf.format(_offlinePrice)}원',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: kAmber),
+                  ),
+              ]),
+
+            // 비교 배지
+            if (diff != null && diff != 0) ...[
+              const SizedBox(height: 3),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: diff > 0
+                      ? Colors.green.shade50
+                      : Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  diff > 0
+                      ? '온라인이 ${nf.format(diff)}원 저렴'
+                      : '오프라인이 ${nf.format(-diff)}원 저렴',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: diff > 0 ? Colors.green.shade700 : Colors.orange.shade700,
+                  ),
+                ),
+              ),
+            ],
+
+            // 장소
+            if (_storeHint != null && _storeHint!.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Row(children: [
+                Icon(Icons.place_outlined, size: 11, color: kOnSurfaceVariant.withValues(alpha: 0.7)),
+                const SizedBox(width: 3),
+                Text(_storeHint!, style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant)),
+              ]),
+            ],
+
+            // 메모
+            if (_memo != null && _memo!.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Row(children: [
+                Icon(Icons.notes, size: 11, color: kOnSurfaceVariant.withValues(alpha: 0.7)),
+                const SizedBox(width: 3),
+                Expanded(
+                  child: Text(
+                    _memo!,
+                    style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant, fontStyle: FontStyle.italic),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ]),
+            ],
+          ]),
+        ),
+      ]),
+    );
+  }
 }
 
 // ── 비상품 카드 ───────────────────────────────────────────
@@ -602,6 +863,192 @@ class _NonProductHistoryCard extends StatelessWidget {
         if (scanType == 'qr_url')
           Icon(Icons.open_in_new, color: Colors.grey.shade400, size: 18),
       ]),
+    );
+  }
+}
+
+// ── 유사 상품 추천 섹션 ───────────────────────────────────
+
+class _HistoryRecommendSection extends StatelessWidget {
+  final String barcode;
+  final String productName;
+  final NumberFormat nf;
+  final WidgetRef ref;
+
+  const _HistoryRecommendSection({
+    required this.barcode,
+    required this.productName,
+    required this.nf,
+    required this.ref,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recommendAsync = ref.watch(
+      recommendProvider(RecommendArgs(barcode: barcode, productName: productName)),
+    );
+
+    return recommendAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (data) {
+        final items = (data['recommendations'] as List? ?? []).cast<Map<String, dynamic>>();
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Divider(color: Colors.grey.shade100, height: 20),
+              Row(children: [
+                Text(
+                  '이런 상품도 있어요',
+                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: kOnSurfaceVariant),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: kPrimary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '쿠팡·네이버',
+                    style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: kPrimary),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 150,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: items.take(6).length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final item = items[i];
+                    final price = (item['price'] as num).toInt();
+                    final name = item['product_name'] as String;
+                    final imageUrl = item['image_url'] as String?;
+                    final url = item['shopping_url'] as String;
+                    return GestureDetector(
+                      onTap: () async {
+                        final uri = Uri.tryParse(url);
+                        if (uri != null && await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      child: Container(
+                        width: 120,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: kSurface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.grey.shade100),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2)),
+                          ],
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Container(
+                            height: 60,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: imageUrl != null
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      imageUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Icon(Icons.inventory_2_outlined, color: Colors.grey.shade300, size: 22),
+                                    ),
+                                  )
+                                : Icon(Icons.inventory_2_outlined, color: Colors.grey.shade300, size: 22),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            name,
+                            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500, color: kOnSurface),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${nf.format(price)}원',
+                            style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w800, color: kPrimary),
+                          ),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── 배너 광고 위젯 ─────────────────────────────────────────
+
+class _BannerAdWidget extends StatefulWidget {
+  const _BannerAdWidget();
+
+  @override
+  State<_BannerAdWidget> createState() => _BannerAdWidgetState();
+}
+
+class _BannerAdWidgetState extends State<_BannerAdWidget> {
+  BannerAd? _ad;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAd();
+  }
+
+  void _loadAd() {
+    // 실제 배포 시 ca-app-pub-XXXXX/YYYYY 형태의 실제 광고 ID로 교체하세요.
+    final adUnitId = Platform.isAndroid
+        ? 'ca-app-pub-3940256099942544/6300978111' // Google 테스트 ID
+        : 'ca-app-pub-3940256099942544/2934735716'; // Google 테스트 ID (iOS)
+    _ad = BannerAd(
+      adUnitId: adUnitId,
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (mounted) setState(() => _loaded = true);
+        },
+        onAdFailedToLoad: (ad, _) {
+          ad.dispose();
+          _ad = null;
+        },
+      ),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded || _ad == null) return const SizedBox.shrink();
+    return Container(
+      alignment: Alignment.center,
+      width: _ad!.size.width.toDouble(),
+      height: _ad!.size.height.toDouble(),
+      child: AdWidget(ad: _ad!),
     );
   }
 }

@@ -82,13 +82,14 @@ router.post('/', async (req: Request, res: Response) => {
   });
 });
 
-// POST /api/v1/scans/:scanId/offline-price — 마트 직접 입력 가격 저장
+// POST /api/v1/scans/:scanId/offline-price — 오프라인 가격 최초 저장
 router.post('/:scanId/offline-price', async (req: Request, res: Response) => {
   const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
   const scanId = BigInt(scanIdParam);
   const schema = z.object({
     price: z.number().int().positive(),
-    store_hint: z.string().optional(),
+    store_hint: z.string().optional().nullable(),
+    memo: z.string().optional().nullable(),
   });
 
   const parseResult = schema.safeParse(req.body);
@@ -97,7 +98,7 @@ router.post('/:scanId/offline-price', async (req: Request, res: Response) => {
   }
 
   const offlinePrice = await prisma.offlinePrice.create({
-    data: { scanId, price: parseResult.data.price, storeHint: parseResult.data.store_hint },
+    data: { scanId, price: parseResult.data.price, storeHint: parseResult.data.store_hint ?? undefined, memo: parseResult.data.memo ?? undefined },
   });
 
   return res.status(201).json({
@@ -105,6 +106,52 @@ router.post('/:scanId/offline-price', async (req: Request, res: Response) => {
     scan_id: offlinePrice.scanId.toString(),
     price: offlinePrice.price,
     store_hint: offlinePrice.storeHint,
+    memo: offlinePrice.memo,
+    created_at: offlinePrice.createdAt,
+  });
+});
+
+// PATCH /api/v1/scans/:scanId/offline-price — 오프라인 가격/장소/메모 수정 (없으면 생성)
+router.patch('/:scanId/offline-price', async (req: Request, res: Response) => {
+  const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
+  const scanId = BigInt(scanIdParam);
+  const schema = z.object({
+    price: z.number().int().positive().optional(),
+    store_hint: z.string().nullable().optional(),
+    memo: z.string().nullable().optional(),
+  });
+
+  const parseResult = schema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({ error: 'INVALID_REQUEST', details: parseResult.error.flatten() });
+  }
+
+  const data = parseResult.data;
+  const existing = await prisma.offlinePrice.findFirst({ where: { scanId } });
+
+  let offlinePrice;
+  if (existing) {
+    offlinePrice = await prisma.offlinePrice.update({
+      where: { id: existing.id },
+      data: {
+        ...(data.price !== undefined && { price: data.price }),
+        ...(data.store_hint !== undefined && { storeHint: data.store_hint }),
+        ...(data.memo !== undefined && { memo: data.memo }),
+      },
+    });
+  } else {
+    if (!data.price) return res.status(400).json({ error: 'price required for new entry' });
+    offlinePrice = await prisma.offlinePrice.create({
+      data: { scanId, price: data.price, storeHint: data.store_hint ?? undefined, memo: data.memo ?? undefined },
+    });
+  }
+
+  return res.json({
+    id: offlinePrice.id.toString(),
+    scan_id: offlinePrice.scanId.toString(),
+    price: offlinePrice.price,
+    store_hint: offlinePrice.storeHint,
+    memo: offlinePrice.memo,
     created_at: offlinePrice.createdAt,
   });
 });
@@ -158,6 +205,7 @@ router.get('/history', async (req: Request, res: Response) => {
             lowest_online_platform: lowestOnline?.platform ?? null,
             offline_price: offlinePrice?.price ?? null,
             store_hint: offlinePrice?.storeHint ?? null,
+            memo: offlinePrice?.memo ?? null,
           }
         : {
             barcode_content: scan.barcodeContent

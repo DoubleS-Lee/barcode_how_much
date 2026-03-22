@@ -10,7 +10,6 @@ import '../../shared/widgets/app_bottom_nav.dart';
 
 // 알림 설정 상태
 final _notifyPriceDropProvider = StateProvider<bool>((ref) => true);
-final _notifyWeeklyProvider = StateProvider<bool>((ref) => false);
 
 // 디바이스 UUID
 final _deviceUuidProvider = FutureProvider<String>((ref) => DeviceId.get());
@@ -52,13 +51,6 @@ class SettingsScreen extends ConsumerWidget {
               title: '가격 하락 알림',
               subtitle: '찜한 상품 가격이 내려가면 알려드려요',
               provider: _notifyPriceDropProvider,
-            ),
-            _ToggleTile(
-              icon: Icons.calendar_today_outlined,
-              iconColor: kPrimary,
-              title: '주간 리포트',
-              subtitle: '매주 월요일 절약 현황을 알려드려요',
-              provider: _notifyWeeklyProvider,
             ),
             const SizedBox(height: 28),
 
@@ -239,30 +231,6 @@ class _PremiumBanner extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 13,
               color: Colors.white.withValues(alpha: 0.8),
-            ),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: ElevatedButton(
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('프리미엄 구독 기능 준비 중입니다')),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: kPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: Text(
-                '월 1,900원으로 시작하기',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
             ),
           ),
         ],

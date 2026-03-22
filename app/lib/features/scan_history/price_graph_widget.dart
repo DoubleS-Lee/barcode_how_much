@@ -52,59 +52,18 @@ class PriceGraphWidget extends StatelessWidget {
     final maxY = allPrices.reduce((a, b) => a > b ? a : b);
     final padding = (maxY - minY) * 0.2 + 500;
 
-    // 절약 요약
-    int? latestOnline;
-    int? latestOffline;
-    if (onlineSpots.isNotEmpty) latestOnline = onlineSpots.last.y.toInt();
-    if (offlineSpots.isNotEmpty) latestOffline = offlineSpots.last.y.toInt();
-    final savedAmount = (latestOffline != null && latestOnline != null && latestOffline > latestOnline)
-        ? latestOffline - latestOnline
-        : null;
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 절약 요약 배너
-          if (savedAmount != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.green.shade100),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.savings_outlined, size: 16, color: Colors.green.shade600),
-                  const SizedBox(width: 8),
-                  Text(
-                    '온라인이 마트보다 ',
-                    style: GoogleFonts.inter(fontSize: 13, color: Colors.green.shade700),
-                  ),
-                  Text(
-                    '${nf.format(savedAmount)}원 저렴',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.green.shade700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-
           // 범례
           Row(
             children: [
               _LegendDot(color: kPrimary, label: '온라인 최저가'),
               const SizedBox(width: 16),
               if (offlineSpots.isNotEmpty)
-                _LegendDot(color: kAmber, label: '마트 직접 입력가'),
+                _LegendDot(color: kAmber, label: '오프라인 가격'),
             ],
           ),
           const SizedBox(height: 12),

@@ -50,8 +50,11 @@ dependencies:
   kakao_flutter_sdk_share: ^1.9.7
   google_mobile_ads: ^5.3.0
   flutter_local_notifications: ^18.0.1
-  firebase_core: ^3.13.0
-  firebase_messaging: ^15.2.5
+  # firebase_core와 firebase_messaging은 모바일(Android/iOS) 빌드 시에만 추가하세요.
+  # Windows 빌드에서는 C++ SDK 링크 오류가 발생합니다.
+  # 모바일 빌드 준비: flutterfire configure 실행 후 아래 두 줄 주석 해제
+  # firebase_core: ^3.13.0
+  # firebase_messaging: ^15.2.5
   image_picker: ^1.1.2
   mobile_scanner: ^6.0.5
   audioplayers: ^6.1.0

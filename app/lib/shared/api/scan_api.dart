@@ -47,6 +47,20 @@ class ScanApi {
     });
   }
 
+  /// PATCH /api/v1/scans/:scanId/offline-price — 오프라인 가격/장소/메모 수정 (없으면 생성)
+  static Future<void> patchOfflinePrice({
+    required String scanId,
+    int? price,
+    String? storeHint,
+    String? memo,
+  }) async {
+    await dio.patch('/api/v1/scans/$scanId/offline-price', data: {
+      if (price != null) 'price': price,
+      'store_hint': storeHint,
+      'memo': memo,
+    });
+  }
+
   /// PATCH /api/v1/price/products/:barcode — 상품명 직접 수정
   static Future<void> patchProductName({
     required String barcode,

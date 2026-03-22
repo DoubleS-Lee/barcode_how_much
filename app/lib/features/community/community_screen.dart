@@ -1,9 +1,13 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
 import '../../shared/api/scan_api.dart';
@@ -104,6 +108,11 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
+          // ── 배너 광고 ──
+          if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS))
+            const _BannerAdWidget(),
+
           // ── 게시글 목록 ──
           Expanded(
             child: postsAsync.when(
@@ -832,6 +841,35 @@ class _PriceLookupRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ] else
+          const Spacer(),
+        if (pl.productUrl != null) ...[
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () async {
+              final uri = Uri.tryParse(pl.productUrl!);
+              if (uri != null && await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: kPrimary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kPrimary.withValues(alpha: 0.2)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.open_in_new, size: 11, color: kPrimary),
+                const SizedBox(width: 3),
+                Text(
+                  '상품 보기',
+                  style: GoogleFonts.inter(
+                      fontSize: 11, fontWeight: FontWeight.w600, color: kPrimary),
+                ),
+              ]),
+            ),
+          ),
         ],
       ]),
     );
@@ -1220,8 +1258,8 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
                 TextField(
                   controller: _manualBarcodeCtrl,
                   decoration: InputDecoration(
-                    labelText: '바코드 직접 입력',
-                    hintText: '바코드 번호 또는 상품명',
+                    labelText: '상품명 직접 입력',
+                    hintText: '상품명을 입력하세요',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
                     contentPadding: const EdgeInsets.symmetric(
@@ -1470,6 +1508,64 @@ class _ErrorView extends StatelessWidget {
         const SizedBox(height: 12),
         TextButton(onPressed: onRetry, child: const Text('다시 시도')),
       ]),
+    );
+  }
+}
+
+// ── 배너 광고 위젯 ─────────────────────────────────────────
+
+class _BannerAdWidget extends StatefulWidget {
+  const _BannerAdWidget();
+
+  @override
+  State<_BannerAdWidget> createState() => _BannerAdWidgetState();
+}
+
+class _BannerAdWidgetState extends State<_BannerAdWidget> {
+  BannerAd? _ad;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAd();
+  }
+
+  void _loadAd() {
+    // 실제 배포 시 ca-app-pub-XXXXX/YYYYY 형태의 실제 광고 ID로 교체하세요.
+    final adUnitId = Platform.isAndroid
+        ? 'ca-app-pub-3940256099942544/6300978111' // Google 테스트 ID
+        : 'ca-app-pub-3940256099942544/2934735716'; // Google 테스트 ID (iOS)
+    _ad = BannerAd(
+      adUnitId: adUnitId,
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (mounted) setState(() => _loaded = true);
+        },
+        onAdFailedToLoad: (ad, _) {
+          ad.dispose();
+          _ad = null;
+        },
+      ),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded || _ad == null) return const SizedBox.shrink();
+    return Container(
+      alignment: Alignment.center,
+      width: _ad!.size.width.toDouble(),
+      height: _ad!.size.height.toDouble(),
+      child: AdWidget(ad: _ad!),
     );
   }
 }
