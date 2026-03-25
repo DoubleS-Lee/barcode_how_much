@@ -270,4 +270,17 @@ router.delete('/history', async (req: Request, res: Response) => {
   return res.json({ deleted: count });
 });
 
+// DELETE /api/v1/scans/:scanId — 단일 스캔 삭제 (history 라우트보다 뒤에 위치해야 함)
+router.delete('/:scanId', async (req: Request, res: Response) => {
+  const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
+  const scanId = BigInt(scanIdParam);
+
+  await prisma.onlinePrice.deleteMany({ where: { scanId } });
+  await prisma.offlinePrice.deleteMany({ where: { scanId } });
+  await prisma.barcodeContent.deleteMany({ where: { scanId } });
+  await prisma.scan.delete({ where: { id: scanId } });
+
+  return res.json({ deleted: 1 });
+});
+
 export default router;

@@ -23,16 +23,10 @@ export async function searchCoupang(barcode: string): Promise<CoupangResult | nu
   const accessKey = process.env.COUPANG_ACCESS_KEY;
   const partnerId = process.env.COUPANG_PARTNER_ID;
 
-  // API 키 미설정 시 mock 반환 (개발 환경)
+  // API 키 미설정 시 null 반환
   if (!accessKey || accessKey === 'your_access_key_here') {
-    console.log('[Coupang] Using mock data (API key not set)');
-    return {
-      platform: 'coupang',
-      productName: '세탁세제 OO 2L (Mock)',
-      price: 9800,
-      imageUrl: null,
-      affiliateUrl: `https://coupang.com/vp/products/mock?partnerCode=${partnerId || 'test'}`,
-    };
+    console.log('[Coupang] API key not set, skipping');
+    return null;
   }
 
   const method = 'GET';

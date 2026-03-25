@@ -53,16 +53,10 @@ export async function searchNaver(barcode: string, productName?: string): Promis
   const clientId = process.env.NAVER_CLIENT_ID ?? '';
   const clientSecret = process.env.NAVER_CLIENT_SECRET ?? '';
 
-  // API 키 미설정 시 mock 반환 (개발 환경)
+  // API 키 미설정 시 null 반환
   if (!clientId || clientId === 'your_client_id_here') {
-    console.log('[Naver] Using mock data (API key not set)');
-    return {
-      platform: 'naver',
-      productName: '세탁세제 OO 2L (Mock)',
-      price: 10200,
-      imageUrl: null,
-      shoppingUrl: 'https://shopping.naver.com/mock',
-    };
+    console.log('[Naver] API key not set, skipping');
+    return null;
   }
 
   const timeout = parseInt(process.env.API_TIMEOUT_MS || '3000');

@@ -7,7 +7,7 @@ import '../scan_history/scan_history_provider.dart';
 
 /// 마트 직접 입력 가격 — ManualPrice → PriceResult 간 공유
 final offlinePriceProvider =
-    StateProvider.family<int?, String>((ref, barcode) => null);
+    StateProvider.autoDispose.family<int?, String>((ref, barcode) => null);
 
 /// 바코드별 가격 조회 — GET /api/v1/price?barcode=
 final priceProvider =
@@ -17,7 +17,7 @@ final priceProvider =
 
 /// 스캔 저장 + 가격 조회를 한 번에 처리하는 Notifier
 class PriceResultNotifier
-    extends FamilyAsyncNotifier<Map<String, dynamic>, String> {
+    extends AutoDisposeFamilyAsyncNotifier<Map<String, dynamic>, String> {
   bool _scanSaved = false;
 
   @override
@@ -54,6 +54,7 @@ class PriceResultNotifier
             .toList(),
       );
       ref.invalidate(scanHistoryProvider);
+      ref.invalidate(priceHistoryProvider(barcode));
       return result['scan_id'] as String?;
     } catch (e) {
       debugPrint('[ScanSave] Failed: $e');
@@ -67,5 +68,5 @@ class PriceResultNotifier
   }
 }
 
-final priceResultProvider = AsyncNotifierProvider.family<PriceResultNotifier,
+final priceResultProvider = AsyncNotifierProvider.autoDispose.family<PriceResultNotifier,
     Map<String, dynamic>, String>(PriceResultNotifier.new);

@@ -8,6 +8,7 @@ import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
 import 'package:shimmer/shimmer.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/theme.dart';
 import '../../shared/providers/scan_settings_provider.dart';
 import '../../shared/utils/scan_feedback.dart';
@@ -57,6 +58,16 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         torchEnabled: false,
       );
     }
+
+    // 위치 권한 요청 (카메라 권한 다이얼로그와 겹치지 않도록 약간 지연)
+    Future.delayed(const Duration(milliseconds: 800), _requestLocationPermission);
+  }
+
+  Future<void> _requestLocationPermission() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      await Geolocator.requestPermission();
+    }
   }
 
   @override
@@ -93,7 +104,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       await Future.delayed(const Duration(milliseconds: 800));
       if (mounted) {
         setState(() => _isLoading = false);
-        await context.push('/manual-price/$barcode');
+        await context.push('/price-result/$barcode');
         await _cameraController?.start();
       }
     } catch (_) {
@@ -130,6 +141,84 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       _ => 'qrcode',
     };
     _simulateScan(rawValue, format);
+  }
+
+  void _showHelp() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '사용 방법',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white),
+            ),
+            const SizedBox(height: 20),
+            ...[
+              (Icons.center_focus_strong_outlined, '바코드 인식',
+                  '사각형 안에 바코드를 비추면 자동으로 인식됩니다.\n식품·생활용품·전자기기 바코드를 지원해요.'),
+              (Icons.flashlight_on_outlined, '어두운 환경',
+                  '좌측 상단 플래시 버튼을 켜면\n어두운 매장에서도 스캔할 수 있어요.'),
+              (Icons.photo_library_outlined, '사진으로 스캔',
+                  '아래 "사진에서 바코드 인식" 버튼으로\n갤러리 사진 속 바코드도 인식할 수 있어요.'),
+              (Icons.price_check_outlined, '가격 비교',
+                  '바코드 인식 후 마트 현재 가격을 입력하면\n온라인 최저가와 즉시 비교해드려요.'),
+            ].map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: kPrimary.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(item.$1, color: kPrimary, size: 20),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(item.$2,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14, fontWeight: FontWeight.w700,
+                            color: Colors.white)),
+                        const SizedBox(height: 3),
+                        Text(item.$3,
+                          style: GoogleFonts.inter(
+                            fontSize: 12, color: Colors.white.withValues(alpha: 0.6),
+                            height: 1.5)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleFlash() async {
@@ -184,7 +273,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0x99000000), Colors.transparent],
+              colors: [Color(0x55000000), Colors.transparent],
             ),
           ),
         ),
@@ -196,7 +285,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
         centerTitle: true,
         actions: [
-          IconButton(icon: const Icon(Icons.help_outline, color: Colors.white), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.help_outline, color: Colors.white), onPressed: _showHelp),
         ],
       ),
       body: Stack(
@@ -331,10 +420,10 @@ class _ScannerOverlay extends StatelessWidget {
     final sideW = (MediaQuery.of(context).size.width - frameSize) / 2;
 
     return Stack(children: [
-      Positioned(top: 0, left: 0, right: 0, height: frameTop, child: const ColoredBox(color: Color(0x99000000))),
-      Positioned(top: frameTop + frameSize, left: 0, right: 0, bottom: 0, child: const ColoredBox(color: Color(0x99000000))),
-      Positioned(top: frameTop, left: 0, width: sideW, height: frameSize, child: const ColoredBox(color: Color(0x99000000))),
-      Positioned(top: frameTop, right: 0, width: sideW, height: frameSize, child: const ColoredBox(color: Color(0x99000000))),
+      Positioned(top: 0, left: 0, right: 0, height: frameTop, child: const ColoredBox(color: Color(0x55000000))),
+      Positioned(top: frameTop + frameSize, left: 0, right: 0, bottom: 0, child: const ColoredBox(color: Color(0x55000000))),
+      Positioned(top: frameTop, left: 0, width: sideW, height: frameSize, child: const ColoredBox(color: Color(0x55000000))),
+      Positioned(top: frameTop, right: 0, width: sideW, height: frameSize, child: const ColoredBox(color: Color(0x55000000))),
       Positioned(
         top: frameTop, left: sideW, width: frameSize, height: frameSize,
         child: Stack(children: [

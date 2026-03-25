@@ -90,10 +90,13 @@ model Post {
   latitude      Decimal? @db.Decimal(9, 6)
   longitude     Decimal? @db.Decimal(9, 6)
   locationHint  String?  @map("location_hint") @db.VarChar(200)
+  imageUrl      String?  @map("image_url")
   viewCount     Int      @default(0) @map("view_count")
   likeCount     Int      @default(0) @map("like_count")
+  reportCount   Int      @default(0) @map("report_count")
   likes         PostLike[]
   comments      PostComment[]
+  reports       PostReport[]
   priceLookups  PostPriceLookup[]
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -121,6 +124,16 @@ model PostComment {
   @@map("post_comments")
 }
 
+model PostReport {
+  id         BigInt   @id @default(autoincrement())
+  postId     BigInt   @map("post_id")
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  deviceUuid String   @map("device_uuid") @db.VarChar(36)
+  createdAt  DateTime @default(now()) @map("created_at")
+  @@unique([postId, deviceUuid])
+  @@map("post_reports")
+}
+
 model PostPriceLookup {
   id          BigInt   @id @default(autoincrement())
   postId      BigInt   @map("post_id")
@@ -131,6 +144,17 @@ model PostPriceLookup {
   productUrl  String?  @map("product_url")
   fetchedAt   DateTime @default(now()) @map("fetched_at")
   @@map("post_price_lookups")
+}
+
+// 찜한 상품 (기기별 바코드 목록)
+model DeviceFavorite {
+  id         BigInt   @id @default(autoincrement())
+  deviceUuid String   @map("device_uuid") @db.VarChar(36)
+  barcode    String   @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([deviceUuid, barcode])
+  @@map("device_favorites")
 }
 
 // 비상품 바코드 원문 내용 (QR URL, WiFi, 연락처, 텍스트 등)

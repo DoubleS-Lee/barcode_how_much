@@ -1,16 +1,17 @@
-import 'dart:io';
+﻿import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
+import 'package:kakao_flutter_sdk_share/kakao_flutter_sdk_share.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
-import '../../shared/api/scan_api.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 
@@ -23,10 +24,6 @@ final _postsProvider = FutureProvider.autoDispose
 });
 
 final _deviceUuidProvider = FutureProvider<String>((ref) => DeviceId.get());
-
-// ── 위치 옵션 열거형 ──────────────────────────────────────
-
-enum _LocationOption { none, fromProduct, current, manual }
 
 // ── 메인 화면 ─────────────────────────────────────────────
 
@@ -214,11 +211,76 @@ class _PostCardState extends ConsumerState<_PostCard> {
     }
   }
 
+  Future<void> _report(BuildContext context) async {
+    if (_post.reported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이미 신고한 글입니다')),
+      );
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('신고', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Text('이 게시글을 신고하시겠어요?\n허위 신고 시 서비스 이용이 제한될 수 있습니다.',
+            style: GoogleFonts.inter(fontSize: 14, height: 1.5)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: Text('신고', style: GoogleFonts.inter(color: kError, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      final uuid = await DeviceId.get();
+      final result = await PostsApi.reportPost(id: _post.id, deviceUuid: uuid);
+      if (mounted) {
+        setState(() {
+          _post = _post.copyWith(
+            reported: true,
+            reportCount: result['report_count'] as int,
+          );
+        });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('신고가 접수되었습니다')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('신고 처리 중 오류가 발생했습니다')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final deviceAsync = ref.watch(_deviceUuidProvider);
     final myUuid = deviceAsync.valueOrNull;
     final isOwner = myUuid != null && myUuid.startsWith(_post.authorId);
+
+    // 20회 이상 신고된 글은 차단
+    if (_post.reportCount >= 20) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(children: [
+          Icon(Icons.block, size: 16, color: Colors.grey.shade400),
+          const SizedBox(width: 8),
+          Text('신고로 제재된 글입니다',
+              style: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade500)),
+        ]),
+      );
+    }
 
     return GestureDetector(
       onTap: () => _showDetail(context),
@@ -236,6 +298,19 @@ class _PostCardState extends ConsumerState<_PostCard> {
           ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (_post.imageUrl != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                _post.imageUrl!,
+                width: double.infinity,
+                height: 140,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           Row(children: [
             Expanded(
               child: Text(
@@ -328,24 +403,13 @@ class _PostCardState extends ConsumerState<_PostCard> {
               style: GoogleFonts.inter(fontSize: 10, color: kOnSurfaceVariant),
             ),
             const SizedBox(width: 8),
-            // 좋아요
-            GestureDetector(
-              onTap: _toggleLike,
-              child: Row(children: [
-                Icon(
-                  _post.liked ? Icons.favorite : Icons.favorite_border,
-                  size: 14,
-                  color: _post.liked ? const Color(0xFFEF4444) : kOnSurfaceVariant,
-                ),
-                const SizedBox(width: 2),
-                Text(
-                  '${_post.likeCount}',
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    color: _post.liked ? const Color(0xFFEF4444) : kOnSurfaceVariant,
-                  ),
-                ),
-              ]),
+            // 좋아요 수 (탭 불가 — 상세에서만 가능)
+            Icon(Icons.favorite_border, size: 12,
+                color: kOnSurfaceVariant.withValues(alpha: 0.7)),
+            const SizedBox(width: 2),
+            Text(
+              '${_post.likeCount}',
+              style: GoogleFonts.inter(fontSize: 10, color: kOnSurfaceVariant),
             ),
             const SizedBox(width: 8),
             // 댓글수
@@ -494,6 +558,180 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
     }
   }
 
+  Future<void> _report() async {
+    if (_post.reported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이미 신고한 글입니다')),
+      );
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('신고', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Text('이 게시글을 신고하시겠어요?\n허위 신고 시 서비스 이용이 제한될 수 있습니다.',
+            style: GoogleFonts.inter(fontSize: 14, height: 1.5)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: Text('신고', style: GoogleFonts.inter(color: kError, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      final uuid = await DeviceId.get();
+      final result = await PostsApi.reportPost(id: _post.id, deviceUuid: uuid);
+      if (mounted) {
+        final updated = _post.copyWith(reported: true, reportCount: result['report_count'] as int);
+        setState(() => _post = updated);
+        widget.onLikeChanged?.call(updated);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('신고가 접수되었습니다')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('신고 처리 중 오류가 발생했습니다')),
+      );
+    }
+  }
+
+  void _showShareSheet() {
+    final postUrl = 'https://eolmaeossjeo.com/posts/${_post.id}';
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(width: 40, height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2))),
+            ),
+            const SizedBox(height: 20),
+            Text('공유하기', style: GoogleFonts.plusJakartaSans(
+                fontSize: 18, fontWeight: FontWeight.w800, color: kOnSurface)),
+            const SizedBox(height: 20),
+            // 링크 복사
+            GestureDetector(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: postUrl));
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('링크가 복사되었습니다')),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: kBackground,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: kPrimary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.link, color: kPrimary, size: 20),
+                  ),
+                  const SizedBox(width: 14),
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('링크 복사', style: GoogleFonts.inter(
+                        fontSize: 15, fontWeight: FontWeight.w600, color: kOnSurface)),
+                    Text('게시글 링크를 클립보드에 복사합니다',
+                        style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
+                  ]),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 카카오톡 공유
+            GestureDetector(
+              onTap: () async {
+                Navigator.pop(context);
+                await _shareToKakao();
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE500).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFFEE500)),
+                ),
+                child: Row(children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE500),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text('K', style: GoogleFonts.plusJakartaSans(
+                          fontSize: 18, fontWeight: FontWeight.w900,
+                          color: const Color(0xFF3A1D1D))),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('카카오톡으로 공유', style: GoogleFonts.inter(
+                        fontSize: 15, fontWeight: FontWeight.w600, color: kOnSurface)),
+                    Text('카카오톡 친구에게 게시글을 공유합니다',
+                        style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
+                  ]),
+                ]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _shareToKakao() async {
+    try {
+      final template = FeedTemplate(
+        content: Content(
+          title: _post.title,
+          description: '${NumberFormat('#,###').format(_post.price)}원 · ${_post.content.length > 50 ? '${_post.content.substring(0, 50)}...' : _post.content}',
+          imageUrl: Uri.parse('https://eolmaeossjeo.com/og-image.png'),
+          link: Link(
+            webUrl: Uri.parse('https://eolmaeossjeo.com/posts/${_post.id}'),
+            mobileWebUrl: Uri.parse('https://eolmaeossjeo.com/posts/${_post.id}'),
+          ),
+        ),
+      );
+      if (await ShareClient.instance.isKakaoTalkSharingAvailable()) {
+        final uri = await ShareClient.instance.shareDefault(template: template);
+        await ShareClient.instance.launchKakaoTalk(uri);
+      } else {
+        final uri = await WebSharerClient.instance.makeDefaultUrl(template: template);
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('카카오톡 공유 실패: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _submitComment() async {
     final text = _commentCtrl.text.trim();
     if (text.isEmpty) return;
@@ -636,6 +874,18 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                         style: GoogleFonts.inter(
                             fontSize: 14, color: kOnSurface, height: 1.7),
                       ),
+                      if (_post.imageUrl != null) ...[
+                        const SizedBox(height: 16),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(
+                            _post.imageUrl!,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
 
                       // ── 가격 조회 섹션 ──
@@ -652,9 +902,9 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                         const SizedBox(height: 12),
                       ],
 
-                      // ── 좋아요 버튼 ──
+                      // ── 좋아요 / 공유 / 신고 버튼 ──
                       Row(children: [
-                        const Spacer(),
+                        // 좋아요
                         GestureDetector(
                           onTap: _toggleLike,
                           child: Container(
@@ -673,9 +923,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
                               Icon(
-                                _post.liked
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
+                                _post.liked ? Icons.favorite : Icons.favorite_border,
                                 size: 18,
                                 color: _post.liked
                                     ? const Color(0xFFEF4444)
@@ -692,6 +940,53 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                                       : kOnSurfaceVariant,
                                 ),
                               ),
+                            ]),
+                          ),
+                        ),
+                        const Spacer(),
+                        // 공유
+                        GestureDetector(
+                          onTap: _showShareSheet,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: kBackground,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: kOutlineVariant),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.share_outlined, size: 18, color: kPrimary),
+                              const SizedBox(width: 6),
+                              Text('공유', style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 14, fontWeight: FontWeight.w600, color: kPrimary)),
+                            ]),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // 신고
+                        GestureDetector(
+                          onTap: _report,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _post.reported
+                                  ? kError.withValues(alpha: 0.08)
+                                  : kBackground,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: _post.reported ? kError : kOutlineVariant,
+                              ),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(
+                                _post.reported ? Icons.thumb_down : Icons.thumb_down_outlined,
+                                size: 18,
+                                color: _post.reported ? kError : kOnSurfaceVariant,
+                              ),
+                              const SizedBox(width: 6),
+                              Text('신고', style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 14, fontWeight: FontWeight.w600,
+                                  color: _post.reported ? kError : kOnSurfaceVariant)),
                             ]),
                           ),
                         ),
@@ -944,20 +1239,6 @@ class _CommentRow extends StatelessWidget {
 
 // ── 게시글 작성/수정 바텀시트 ────────────────────────────
 
-class _ScannedProduct {
-  final String barcode;
-  final String name;
-  final String? imageUrl;
-  final double? latitude;
-  final double? longitude;
-  _ScannedProduct({
-    required this.barcode,
-    required this.name,
-    this.imageUrl,
-    this.latitude,
-    this.longitude,
-  });
-}
 
 class _PostFormSheet extends ConsumerStatefulWidget {
   final PostModel? editing;
@@ -972,34 +1253,11 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
   late final TextEditingController _titleCtrl;
   late final TextEditingController _contentCtrl;
   late final TextEditingController _priceCtrl;
-  final TextEditingController _manualBarcodeCtrl = TextEditingController();
   final TextEditingController _locationHintCtrl = TextEditingController();
 
-  // null = 선택 안함, '__MANUAL__' = 직접 입력, else = barcode
-  String? _dropdownBarcode;
-  _LocationOption _locationOption = _LocationOption.none;
-
+  File? _imageFile;
+  String? _existingImageUrl; // 수정 시 기존 이미지
   bool _loading = false;
-  bool _loadingProducts = true;
-  List<_ScannedProduct> _products = [];
-
-  String? get _effectiveBarcode {
-    if (_dropdownBarcode == null) return null;
-    if (_dropdownBarcode == '__MANUAL__') {
-      final t = _manualBarcodeCtrl.text.trim();
-      return t.isEmpty ? null : t;
-    }
-    return _dropdownBarcode;
-  }
-
-  _ScannedProduct? get _selectedProduct {
-    if (_dropdownBarcode == null || _dropdownBarcode == '__MANUAL__') return null;
-    try {
-      return _products.firstWhere((p) => p.barcode == _dropdownBarcode);
-    } catch (_) {
-      return null;
-    }
-  }
 
   @override
   void initState() {
@@ -1011,57 +1269,10 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
           ? widget.editing!.price.toString()
           : '',
     );
-    if (widget.editing?.barcode != null) {
-      _dropdownBarcode = widget.editing!.barcode!;
-    }
-    if (widget.editing != null && widget.editing!.shareLocation) {
-      if (widget.editing!.locationHint != null) {
-        _locationOption = _LocationOption.manual;
-        _locationHintCtrl.text = widget.editing!.locationHint!;
-      } else if (widget.editing!.latitude != null) {
-        _locationOption = _LocationOption.current;
-      }
-    }
-    _loadProducts();
-  }
-
-  Future<void> _loadProducts() async {
-    try {
-      final uuid = await DeviceId.get();
-      final history = await ScanApi.getHistory(uuid);
-      final items = history['items'] as List? ?? [];
-      final seen = <String>{};
-      final products = <_ScannedProduct>[];
-      for (final item in items) {
-        if (item['scan_type'] != 'product') continue;
-        final product = item['product'] as Map<String, dynamic>?;
-        final barcode = product?['barcode'] as String?;
-        final name = product?['name'] as String?;
-        if (barcode == null || name == null || seen.contains(barcode)) continue;
-        seen.add(barcode);
-        products.add(_ScannedProduct(
-          barcode: barcode,
-          name: name,
-          imageUrl: product?['image_url'] as String?,
-          latitude: (item['latitude'] as num?)?.toDouble(),
-          longitude: (item['longitude'] as num?)?.toDouble(),
-        ));
-      }
-      if (mounted) {
-        setState(() {
-          _products = products;
-          _loadingProducts = false;
-          if (_dropdownBarcode != null && _dropdownBarcode != '__MANUAL__') {
-            final exists = products.any((p) => p.barcode == _dropdownBarcode);
-            if (!exists) {
-              _manualBarcodeCtrl.text = _dropdownBarcode!;
-              _dropdownBarcode = '__MANUAL__';
-            }
-          }
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingProducts = false);
+    _existingImageUrl = widget.editing?.imageUrl;
+    if (widget.editing != null && widget.editing!.shareLocation &&
+        widget.editing!.locationHint != null) {
+      _locationHintCtrl.text = widget.editing!.locationHint!;
     }
   }
 
@@ -1070,9 +1281,63 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
     _titleCtrl.dispose();
     _contentCtrl.dispose();
     _priceCtrl.dispose();
-    _manualBarcodeCtrl.dispose();
     _locationHintCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1280);
+    if (picked != null && mounted) {
+      setState(() {
+        _imageFile = File(picked.path);
+        _existingImageUrl = null; // 새 이미지로 교체
+      });
+    }
+  }
+
+  void _showImagePickerSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined, color: kPrimary),
+              title: Text('카메라로 촬영', style: GoogleFonts.inter(fontSize: 15)),
+              onTap: () { Navigator.pop(context); _pickImage(ImageSource.camera); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: kPrimary),
+              title: Text('갤러리에서 선택', style: GoogleFonts.inter(fontSize: 15)),
+              onTap: () { Navigator.pop(context); _pickImage(ImageSource.gallery); },
+            ),
+            if (_imageFile != null || _existingImageUrl != null)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: kError),
+                title: Text('사진 제거', style: GoogleFonts.inter(fontSize: 15, color: kError)),
+                onTap: () {
+                  setState(() { _imageFile = null; _existingImageUrl = null; });
+                  Navigator.pop(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _submit() async {
@@ -1088,34 +1353,20 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
     }
 
     setState(() => _loading = true);
-    double? lat, lng;
-    String? locationHint;
-    bool shareLocation = _locationOption != _LocationOption.none;
+    final locationHint = _locationHintCtrl.text.trim().isEmpty
+        ? null
+        : _locationHintCtrl.text.trim();
+    final bool shareLocation = locationHint != null;
 
     try {
-      switch (_locationOption) {
-        case _LocationOption.none:
-          break;
-        case _LocationOption.fromProduct:
-          final p = _selectedProduct;
-          if (p?.latitude != null && p?.longitude != null) {
-            lat = p!.latitude;
-            lng = p.longitude;
-          } else {
-            shareLocation = false;
-          }
-        case _LocationOption.current:
-          final pos = await Geolocator.getCurrentPosition();
-          lat = pos.latitude;
-          lng = pos.longitude;
-        case _LocationOption.manual:
-          final hint = _locationHintCtrl.text.trim();
-          locationHint = hint.isNotEmpty ? hint : null;
-          if (locationHint == null) shareLocation = false;
-      }
-
       final uuid = await DeviceId.get();
-      final barcode = _effectiveBarcode;
+      const String? barcode = null;
+
+      // 새 이미지가 있으면 업로드
+      String? imageUrl = _existingImageUrl;
+      if (_imageFile != null) {
+        imageUrl = await PostsApi.uploadImage(_imageFile!);
+      }
 
       if (widget.editing != null) {
         await PostsApi.updatePost(
@@ -1125,9 +1376,10 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
           content: content,
           price: price,
           barcode: barcode,
+          imageUrl: imageUrl,
           shareLocation: shareLocation,
-          latitude: lat,
-          longitude: lng,
+          latitude: null,
+          longitude: null,
           locationHint: locationHint,
         );
       } else {
@@ -1137,9 +1389,10 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
           content: content,
           price: price,
           barcode: barcode,
+          imageUrl: imageUrl,
           shareLocation: shareLocation,
-          latitude: lat,
-          longitude: lng,
+          latitude: null,
+          longitude: null,
           locationHint: locationHint,
         );
       }
@@ -1147,8 +1400,13 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (e is DioException && e.response?.data != null) {
+          msg = e.response!.data.toString();
+        }
+        debugPrint('[Post] Error: $msg');
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('오류: $e')));
+            .showSnackBar(SnackBar(content: Text('오류: $msg'), duration: const Duration(seconds: 6)));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -1207,101 +1465,20 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
               ),
               const SizedBox(height: 4),
 
-              // ── 관련 상품 ──
-              if (_loadingProducts)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: LinearProgressIndicator(),
-                )
-              else
-                DropdownButtonFormField<String?>(
-                  value: _dropdownBarcode,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: '관련 상품 (선택사항)',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                  ),
-                  style: GoogleFonts.inter(fontSize: 14, color: kOnSurface),
-                  items: [
-                    DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('선택 안함',
-                          style: GoogleFonts.inter(
-                              fontSize: 14, color: kOnSurfaceVariant)),
-                    ),
-                    ..._products.map((p) => DropdownMenuItem<String?>(
-                          value: p.barcode,
-                          child: Text(p.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.inter(fontSize: 14)),
-                        )),
-                    DropdownMenuItem<String?>(
-                      value: '__MANUAL__',
-                      child: Text('직접 입력...',
-                          style: GoogleFonts.inter(
-                              fontSize: 14, color: kPrimary)),
-                    ),
-                  ],
-                  onChanged: (v) => setState(() {
-                    _dropdownBarcode = v;
-                    if (_locationOption == _LocationOption.fromProduct &&
-                        v == null) {
-                      _locationOption = _LocationOption.none;
-                    }
-                  }),
-                ),
-              if (_dropdownBarcode == '__MANUAL__') ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _manualBarcodeCtrl,
-                  decoration: InputDecoration(
-                    labelText: '상품명 직접 입력',
-                    hintText: '상품명을 입력하세요',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                  ),
-                  style: GoogleFonts.inter(fontSize: 14),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ],
-              const SizedBox(height: 12),
-
               // ── 위치 ──
-              _buildLocationDropdown(),
-              if (_locationOption == _LocationOption.fromProduct &&
-                  _selectedProduct?.latitude == null) ...[
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.only(left: 14),
-                  child: Text(
-                    '위치 정보가 있는 상품을 선택하면 자동으로 입력됩니다',
-                    style: GoogleFonts.inter(
-                        fontSize: 11, color: kOnSurfaceVariant),
-                  ),
+              TextField(
+                controller: _locationHintCtrl,
+                decoration: InputDecoration(
+                  labelText: '장소명 (선택사항)',
+                  hintText: '예: 이마트 왕십리점',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 12),
+                  prefixIcon: const Icon(Icons.place_outlined, size: 18),
                 ),
-              ],
-              if (_locationOption == _LocationOption.manual) ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _locationHintCtrl,
-                  decoration: InputDecoration(
-                    labelText: '장소명 입력',
-                    hintText: '예: 이마트 왕십리점',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    prefixIcon:
-                        const Icon(Icons.place_outlined, size: 18),
-                  ),
-                  style: GoogleFonts.inter(fontSize: 14),
-                ),
-              ],
+                style: GoogleFonts.inter(fontSize: 14),
+              ),
               const SizedBox(height: 12),
 
               // ── 금액 ──
@@ -1337,7 +1514,87 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
                 maxLines: 3,
                 maxLength: 1000,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+
+              // ── 사진 첨부 ──
+              GestureDetector(
+                onTap: _showImagePickerSheet,
+                child: _imageFile != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Stack(
+                          children: [
+                            Image.file(
+                              _imageFile!,
+                              width: double.infinity,
+                              height: 180,
+                              fit: BoxFit.cover,
+                            ),
+                            Positioned(
+                              top: 8, right: 8,
+                              child: GestureDetector(
+                                onTap: () => setState(() { _imageFile = null; _existingImageUrl = null; }),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _existingImageUrl != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              children: [
+                                Image.network(
+                                  _existingImageUrl!,
+                                  width: double.infinity,
+                                  height: 180,
+                                  fit: BoxFit.cover,
+                                ),
+                                Positioned(
+                                  top: 8, right: 8,
+                                  child: GestureDetector(
+                                    onTap: () => setState(() { _existingImageUrl = null; }),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Container(
+                            width: double.infinity,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              color: kBackground,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: kOutlineVariant, style: BorderStyle.solid),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.add_photo_alternate_outlined, color: kOnSurfaceVariant, size: 22),
+                                const SizedBox(width: 8),
+                                Text('사진 첨부 (선택사항)',
+                                    style: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+              ),
+              const SizedBox(height: 12),
 
               SizedBox(
                 width: double.infinity,
@@ -1368,69 +1625,6 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
     );
   }
 
-  Widget _buildLocationDropdown() {
-    final hasProductLocation = _selectedProduct?.latitude != null;
-    return DropdownButtonFormField<_LocationOption>(
-      value: _locationOption,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: '위치 (선택사항)',
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      ),
-      style: GoogleFonts.inter(fontSize: 14, color: kOnSurface),
-      items: [
-        DropdownMenuItem(
-          value: _LocationOption.none,
-          child: Row(children: [
-            const Icon(Icons.location_off_outlined,
-                size: 16, color: kOnSurfaceVariant),
-            const SizedBox(width: 8),
-            Text('없음',
-                style: GoogleFonts.inter(
-                    fontSize: 14, color: kOnSurfaceVariant)),
-          ]),
-        ),
-        DropdownMenuItem(
-          value: _LocationOption.fromProduct,
-          enabled: hasProductLocation,
-          child: Row(children: [
-            Icon(Icons.qr_code_scanner,
-                size: 16,
-                color:
-                    hasProductLocation ? kOnSurface : kOnSurfaceVariant),
-            const SizedBox(width: 8),
-            Text('상품 위치 자동입력',
-                style: GoogleFonts.inter(
-                    fontSize: 14,
-                    color: hasProductLocation
-                        ? kOnSurface
-                        : kOnSurfaceVariant)),
-          ]),
-        ),
-        DropdownMenuItem(
-          value: _LocationOption.current,
-          child: Row(children: [
-            const Icon(Icons.my_location_outlined, size: 16),
-            const SizedBox(width: 8),
-            Text('현재 위치', style: GoogleFonts.inter(fontSize: 14)),
-          ]),
-        ),
-        DropdownMenuItem(
-          value: _LocationOption.manual,
-          child: Row(children: [
-            const Icon(Icons.edit_location_outlined, size: 16),
-            const SizedBox(width: 8),
-            Text('직접 입력', style: GoogleFonts.inter(fontSize: 14)),
-          ]),
-        ),
-      ],
-      onChanged: (v) =>
-          setState(() => _locationOption = v ?? _LocationOption.none),
-    );
-  }
 }
 
 // ── 보조 위젯 ─────────────────────────────────────────────

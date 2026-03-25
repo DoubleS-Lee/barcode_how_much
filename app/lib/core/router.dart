@@ -7,6 +7,7 @@ import '../features/manual_price/manual_price_screen.dart';
 import '../features/scan_history/scan_history_screen.dart';
 import '../features/community/community_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/settings/legal_screen.dart';
 
 final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
   return GoRouter(
@@ -28,6 +29,9 @@ final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
       GoRoute(path: '/history', builder: (_, __) => const ScanHistoryScreen()),
       GoRoute(path: '/community', builder: (_, __) => const CommunityScreen()),
       GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
+      GoRoute(path: '/privacy', builder: (_, __) => const PrivacyPolicyScreen()),
+      GoRoute(path: '/terms', builder: (_, __) => const TermsScreen()),
+      GoRoute(path: '/marketing', builder: (_, __) => const MarketingInfoScreen()),
     ],
   );
 });

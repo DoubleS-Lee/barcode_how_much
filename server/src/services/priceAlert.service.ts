@@ -1,20 +1,20 @@
 import cron from 'node-cron';
 import prisma from '../db/prisma';
 import { priceOrchestrator } from './price-orchestrator.service';
-import { sendPriceDropNotification } from './fcm.service';
+import { sendFavoriteDropNotification } from './fcm.service';
 
 /**
- * 6시간마다 실행: FCM 토큰 있는 기기의 감시 상품 가격 확인
- * 조건: 마트 가격 기록된 상품 중 현재 온라인가 < 기록 마트가 이면 알림 발송
+ * 6시간마다 실행: FCM 토큰 있는 기기의 찜한 상품 가격 확인
+ * 조건: 찜한 상품의 현재 온라인가 < 마지막으로 기록된 온라인가 이면 알림 발송
  */
 export function startPriceAlertCron(): void {
-  // 6시간마다 (00:00, 06:00, 12:00, 18:00)
+  // 6시간마다 (00:00, 06:00, 12:00, 18:00 KST)
   cron.schedule('0 */6 * * *', runPriceCheck, { timezone: 'Asia/Seoul' });
-  console.log('[PriceAlert] Cron started (every 6 hours)');
+  console.log('[PriceAlert] Cron started (every 6 hours, favorites-based)');
 }
 
 async function runPriceCheck(): Promise<void> {
-  console.log('[PriceAlert] Starting price check...');
+  console.log('[PriceAlert] Starting favorites price check...');
 
   const devices = await prisma.device.findMany({
     where: { fcmToken: { not: null } },
@@ -25,45 +25,51 @@ async function runPriceCheck(): Promise<void> {
 
   for (const device of devices) {
     try {
-      await checkDeviceProducts(device as { id: bigint; deviceUuid: string; fcmToken: string });
+      await checkDeviceFavorites(device as { id: bigint; deviceUuid: string; fcmToken: string });
     } catch (e) {
       console.error(`[PriceAlert] Error for device ${device.deviceUuid}:`, e);
     }
   }
 }
 
-async function checkDeviceProducts(device: {
+async function checkDeviceFavorites(device: {
   id: bigint;
   deviceUuid: string;
   fcmToken: string;
 }): Promise<void> {
-  // 최근 30일 내 오프라인 가격이 기록된 스캔 (바코드별 최신 마트가격 추출)
-  const scans = await prisma.scan.findMany({
-    where: {
-      deviceId: device.id,
-      barcode: { not: null },
-      scanType: 'product',
-      scannedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      offlinePrices: { some: {} },
-    },
-    include: {
-      offlinePrices: { orderBy: { createdAt: 'desc' }, take: 1 },
-    },
-    orderBy: { scannedAt: 'desc' },
+  // 이 기기의 찜 목록
+  const favorites = await prisma.deviceFavorite.findMany({
+    where: { deviceUuid: device.deviceUuid },
+    select: { barcode: true },
   });
 
-  // 바코드별 최신 마트가격 집계
-  const watchMap = new Map<string, number>();
-  for (const scan of scans) {
-    if (!scan.barcode || scan.offlinePrices.length === 0) continue;
-    if (!watchMap.has(scan.barcode)) {
-      watchMap.set(scan.barcode, scan.offlinePrices[0].price);
-    }
-  }
+  if (favorites.length === 0) return;
+  console.log(`[PriceAlert] ${device.deviceUuid.slice(0, 8)} has ${favorites.length} favorites`);
 
-  for (const [barcode, lastOfflinePrice] of watchMap) {
+  for (const { barcode } of favorites) {
     try {
-      // products 테이블에서 상품명 조회
+      // 이 기기의 마지막 온라인 스캔 가격 (기준점)
+      const lastScan = await prisma.scan.findFirst({
+        where: {
+          deviceId: device.id,
+          barcode,
+          scanType: 'product',
+          onlinePrices: { some: {} },
+        },
+        orderBy: { scannedAt: 'desc' },
+        include: {
+          onlinePrices: {
+            where: { isLowest: true },
+            orderBy: { fetchedAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      const lastKnownPrice = lastScan?.onlinePrices[0]?.price;
+      if (!lastKnownPrice) continue; // 스캔 이력 없으면 건너뜀
+
+      // 상품명 조회
       const product = await prisma.product.findUnique({
         where: { barcode },
         select: { name: true },
@@ -75,15 +81,17 @@ async function checkDeviceProducts(device: {
       if (!result) continue;
 
       const currentOnlinePrice = result.lowest_price as number;
-      if (currentOnlinePrice < lastOfflinePrice) {
-        await sendPriceDropNotification({
+
+      // 마지막 기록 가격보다 현재 더 싸면 알림
+      if (currentOnlinePrice < lastKnownPrice) {
+        await sendFavoriteDropNotification({
           token: device.fcmToken,
           productName,
-          onlinePrice: currentOnlinePrice,
-          offlinePrice: lastOfflinePrice,
+          currentPrice: currentOnlinePrice,
+          previousPrice: lastKnownPrice,
           barcode,
         });
-        // 너무 자주 알림 보내지 않도록 1초 대기
+        // 연속 알림 방지
         await new Promise((r) => setTimeout(r, 1000));
       }
     } catch (e) {

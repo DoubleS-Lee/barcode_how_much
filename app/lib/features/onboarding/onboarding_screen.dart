@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme.dart';
+import '../settings/legal_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -129,6 +130,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         setState(() => _termsAccepted = v ?? false);
                         _updateAll();
                       },
+                      onDetailTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const TermsScreen())),
                     ),
                     const SizedBox(height: 20),
                     _TermsRow(
@@ -140,6 +143,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         setState(() => _privacyAccepted = v ?? false);
                         _updateAll();
                       },
+                      onDetailTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen())),
                     ),
                     const SizedBox(height: 20),
                     _TermsRow(
@@ -151,6 +156,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         setState(() => _marketingAccepted = v ?? false);
                         _updateAll();
                       },
+                      onDetailTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const MarketingInfoScreen())),
                     ),
                     const SizedBox(height: 80),
                   ],
@@ -252,6 +259,7 @@ class _TermsRow extends StatelessWidget {
   final bool isRequired;
   final bool value;
   final ValueChanged<bool?> onChanged;
+  final VoidCallback onDetailTap;
 
   const _TermsRow({
     required this.label,
@@ -259,17 +267,23 @@ class _TermsRow extends StatelessWidget {
     required this.isRequired,
     required this.value,
     required this.onChanged,
+    required this.onDetailTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: Row(
-        children: [
-          _StyledCheckbox(value: value, onChanged: onChanged),
-          const SizedBox(width: 14),
-          Expanded(
+    return Row(
+      children: [
+        // 체크박스 — 탭하면 동의 토글
+        GestureDetector(
+          onTap: () => onChanged(!value),
+          child: _StyledCheckbox(value: value, onChanged: onChanged),
+        ),
+        const SizedBox(width: 14),
+        // 텍스트 + 뱃지 — 탭하면 상세 화면
+        Expanded(
+          child: GestureDetector(
+            onTap: onDetailTap,
             child: Row(
               children: [
                 Text(
@@ -301,9 +315,16 @@ class _TermsRow extends StatelessWidget {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: Colors.grey.shade300, size: 20),
-        ],
-      ),
+        ),
+        // > 버튼 — 탭하면 상세 화면
+        GestureDetector(
+          onTap: onDetailTap,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,15 +1,42 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import '../api/device_api.dart';
 
-/// FCM 서비스 스텁
-/// 실제 FCM은 Firebase 설정 후 모바일 빌드에서 활성화됩니다.
-/// pubspec.yaml의 firebase_core / firebase_messaging 주석 해제 후
-/// flutterfire configure를 실행하면 이 파일을 실제 구현으로 교체할 수 있습니다.
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  debugPrint('[FCM] Background message: ${message.messageId}');
+}
+
 class FcmService {
   static bool _initialized = false;
 
   static Future<void> init(String deviceUuid) async {
-    // Firebase 패키지 미포함 상태 — 모바일 빌드 시 활성화 예정
-    debugPrint('[FCM] Skipped: Firebase not configured (Windows dev build)');
+    try {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+      final messaging = FirebaseMessaging.instance;
+      final settings = await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        final token = await messaging.getToken();
+        if (token != null) {
+          await DeviceApi.registerFcmToken(deviceUuid: deviceUuid, fcmToken: token);
+          debugPrint('[FCM] Token registered');
+        }
+
+        messaging.onTokenRefresh.listen((newToken) {
+          DeviceApi.registerFcmToken(deviceUuid: deviceUuid, fcmToken: newToken);
+        });
+      }
+
+      _initialized = true;
+    } catch (e) {
+      debugPrint('[FCM] Init failed: $e');
+    }
   }
 
   static bool get isInitialized => _initialized;

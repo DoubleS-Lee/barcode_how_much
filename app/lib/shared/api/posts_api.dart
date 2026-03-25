@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:dio/dio.dart';
 import 'api_client.dart' as client;
 
 // ── 가격 조회 결과 모델 ────────────────────────────────────
@@ -53,14 +55,17 @@ class PostModel {
   final String content;
   final int price;
   final String? barcode;
+  final String? imageUrl;
   final bool shareLocation;
   final double? latitude;
   final double? longitude;
   final String? locationHint;
   final int viewCount;
   final int likeCount;
+  final int reportCount;
   final int commentCount;
   final bool liked;
+  final bool reported;
   final List<PriceLookupModel> priceLookups;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -72,14 +77,17 @@ class PostModel {
     required this.content,
     required this.price,
     this.barcode,
+    this.imageUrl,
     required this.shareLocation,
     this.latitude,
     this.longitude,
     this.locationHint,
     this.viewCount = 0,
     this.likeCount = 0,
+    this.reportCount = 0,
     this.commentCount = 0,
     this.liked = false,
+    this.reported = false,
     this.priceLookups = const [],
     required this.createdAt,
     required this.updatedAt,
@@ -92,14 +100,17 @@ class PostModel {
     content: j['content'] ?? '',
     price: j['price'] as int? ?? 0,
     barcode: j['barcode'] as String?,
+    imageUrl: j['image_url'] as String?,
     shareLocation: j['share_location'] as bool? ?? false,
     latitude: (j['latitude'] as num?)?.toDouble(),
     longitude: (j['longitude'] as num?)?.toDouble(),
     locationHint: j['location_hint'] as String?,
     viewCount: j['view_count'] as int? ?? 0,
     likeCount: j['like_count'] as int? ?? 0,
+    reportCount: j['report_count'] as int? ?? 0,
     commentCount: j['comment_count'] as int? ?? 0,
     liked: j['liked'] as bool? ?? false,
+    reported: j['reported'] as bool? ?? false,
     priceLookups: (j['price_lookups'] as List? ?? [])
         .map((e) => PriceLookupModel.fromJson(e as Map<String, dynamic>))
         .toList(),
@@ -107,21 +118,24 @@ class PostModel {
     updatedAt: DateTime.parse(j['updated_at']),
   );
 
-  PostModel copyWith({bool? liked, int? likeCount}) => PostModel(
+  PostModel copyWith({bool? liked, int? likeCount, bool? reported, int? reportCount}) => PostModel(
     id: id,
     authorId: authorId,
     title: title,
     content: content,
     price: price,
     barcode: barcode,
+    imageUrl: imageUrl,
     shareLocation: shareLocation,
     latitude: latitude,
     longitude: longitude,
     locationHint: locationHint,
     viewCount: viewCount,
     likeCount: likeCount ?? this.likeCount,
+    reportCount: reportCount ?? this.reportCount,
     commentCount: commentCount,
     liked: liked ?? this.liked,
+    reported: reported ?? this.reported,
     priceLookups: priceLookups,
     createdAt: createdAt,
     updatedAt: updatedAt,
@@ -132,6 +146,17 @@ class PostModel {
 
 class PostsApi {
   static final _dio = client.dio;
+
+  static Future<String> uploadImage(File imageFile) async {
+    final formData = FormData.fromMap({
+      'image': await MultipartFile.fromFile(
+        imageFile.path,
+        filename: imageFile.path.split('/').last,
+      ),
+    });
+    final res = await _dio.post('/api/v1/posts/upload-image', data: formData);
+    return res.data['image_url'] as String;
+  }
 
   static Future<List<PostModel>> fetchPosts({int page = 1, String? search, String? deviceUuid}) async {
     final res = await _dio.get('/api/v1/posts', queryParameters: {
@@ -150,6 +175,7 @@ class PostsApi {
     required String content,
     required int price,
     String? barcode,
+    String? imageUrl,
     bool shareLocation = false,
     double? latitude,
     double? longitude,
@@ -161,6 +187,7 @@ class PostsApi {
       'content': content,
       'price': price,
       if (barcode != null) 'barcode': barcode,
+      if (imageUrl != null) 'image_url': imageUrl,
       'share_location': shareLocation,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
@@ -176,6 +203,7 @@ class PostsApi {
     required String content,
     required int price,
     String? barcode,
+    String? imageUrl,
     bool shareLocation = false,
     double? latitude,
     double? longitude,
@@ -187,6 +215,7 @@ class PostsApi {
       'content': content,
       'price': price,
       'barcode': barcode,
+      'image_url': imageUrl,
       'share_location': shareLocation,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
@@ -200,6 +229,14 @@ class PostsApi {
     required String deviceUuid,
   }) async {
     await _dio.delete('/api/v1/posts/$id', data: {'device_uuid': deviceUuid});
+  }
+
+  static Future<Map<String, dynamic>> reportPost({
+    required String id,
+    required String deviceUuid,
+  }) async {
+    final res = await _dio.post('/api/v1/posts/$id/report', data: {'device_uuid': deviceUuid});
+    return res.data as Map<String, dynamic>;
   }
 
   static Future<Map<String, dynamic>> likePost({

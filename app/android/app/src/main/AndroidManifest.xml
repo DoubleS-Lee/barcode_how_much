@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
         android:label="얼마였지?"
         android:name="${applicationName}"
@@ -8,6 +11,17 @@
         <meta-data
             android:name="com.kakao.sdk.AppKey"
             android:value="112bf6f973f8f0f99d0ac2b277b46525" />
+
+        <!-- ✅ Naver Login -->
+        <meta-data
+            android:name="com.naver.sdk.clientId"
+            android:value="X7Fm3FgFZup0rVtp8YKa" />
+        <meta-data
+            android:name="com.naver.sdk.clientSecret"
+            android:value="w5i5l0J07Q" />
+        <meta-data
+            android:name="com.naver.sdk.clientName"
+            android:value="얼마였지" />
 
         <!-- ✅ AdMob App ID — admob.google.com에서 발급 후 교체 (현재: 테스트 ID) -->
         <meta-data
@@ -37,9 +51,21 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <!-- kakao + NativeAppKey 형식 (예: kakao1234567890abcdef) -->
                 <data android:host="kakaolink"
-                    android:scheme="112bf6f973f8f0f99d0ac2b277b46525" />
+                    android:scheme="kakao112bf6f973f8f0f99d0ac2b277b46525" />
+            </intent-filter>
+        </activity>
+
+        <!-- ✅ Kakao 로그인 OAuth 리다이렉트 처리 -->
+        <activity
+            android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:host="oauth"
+                    android:scheme="kakao112bf6f973f8f0f99d0ac2b277b46525" />
             </intent-filter>
         </activity>
 

@@ -26,6 +26,44 @@ function ensureInitialized(): boolean {
   }
 }
 
+export async function sendFavoriteDropNotification(params: {
+  token: string;
+  productName: string;
+  currentPrice: number;
+  previousPrice: number;
+  barcode: string;
+}): Promise<void> {
+  if (!ensureInitialized()) return;
+
+  const fmt = (n: number) => n.toLocaleString('ko-KR');
+  const diff = params.previousPrice - params.currentPrice;
+
+  try {
+    await admin.messaging().send({
+      token: params.token,
+      notification: {
+        title: `⭐ ${params.productName}`,
+        body: `찜한 상품이 ${fmt(diff)}원 내려갔어요! 지금 ${fmt(params.currentPrice)}원`,
+      },
+      data: {
+        type: 'favorite_drop',
+        barcode: params.barcode,
+        current_price: String(params.currentPrice),
+        previous_price: String(params.previousPrice),
+      },
+      android: {
+        notification: { channelId: 'price_drop', priority: 'high', sound: 'default' },
+      },
+      apns: {
+        payload: { aps: { sound: 'default', badge: 1 } },
+      },
+    });
+    console.log(`[FCM] Sent favorite drop: ${params.productName}`);
+  } catch (e: any) {
+    console.error('[FCM] Send error:', e?.errorInfo?.code ?? e);
+  }
+}
+
 export async function sendPriceDropNotification(params: {
   token: string;
   productName: string;

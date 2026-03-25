@@ -38,12 +38,14 @@ class ScanApi {
     double? latitude,
     double? longitude,
     String? storeHint,
+    String? memo,
   }) async {
     await dio.post('/api/v1/scans/$scanId/offline-price', data: {
       'price': price,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
       if (storeHint != null) 'store_hint': storeHint,
+      if (memo != null) 'memo': memo,
     });
   }
 
@@ -67,6 +69,11 @@ class ScanApi {
     required String name,
   }) async {
     await dio.patch('/api/v1/price/products/$barcode', data: {'name': name});
+  }
+
+  /// DELETE /api/v1/scans/:scanId — 단일 스캔 삭제
+  static Future<void> deleteScan(String scanId) async {
+    await dio.delete('/api/v1/scans/$scanId');
   }
 
   /// DELETE /api/v1/scans/history?device_uuid=...

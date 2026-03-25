@@ -59,10 +59,11 @@ export async function priceOrchestrator(
   }
 
   // Phase 2: 네이버 검색
-  // - lookupName 있으면: 상품명으로 바로 검색
-  // - lookupName 없으면: 바코드 2단계 검색 (naver.service 내부 처리)
+  // - lookupName 있으면: 상품명으로 바로 검색 (1회)
+  // - lookupName 없으면: 바코드→상품명→재검색 2단계 (시간 더 필요)
+  const naverTimeout = lookupName ? timeout : timeout * 2;
   const [naverSettled] = await Promise.allSettled([
-    withTimeout(searchNaver(barcode, lookupName), timeout),
+    withTimeout(searchNaver(barcode, lookupName), naverTimeout),
   ]);
   const naverResult = naverSettled.status === 'fulfilled' ? naverSettled.value : null;
 
@@ -105,11 +106,29 @@ export async function priceOrchestrator(
     || null;
 
   const priceEntries: PriceEntry[] = [];
-  if (coupangResult) {
+  // 쿠팡은 실제 API 키가 있을 때만 결과에 포함 (Mock 데이터 제외)
+  if (coupangResult && hasCoupangKey) {
     priceEntries.push({ platform: 'coupang', price: coupangResult.price, url: coupangResult.affiliateUrl, is_lowest: false });
   }
   if (naverResult) {
     priceEntries.push({ platform: 'naver', price: naverResult.price, url: naverResult.shoppingUrl, is_lowest: false });
+  }
+
+  if (priceEntries.length === 0) {
+    // 가격 정보 없음 — 상품명만 반환
+    if (productName) {
+      return {
+        barcode,
+        product_name: productName,
+        image_url: imageUrl,
+        prices: [],
+        lowest_price: 0,
+        lowest_platform: '',
+        cached_at: new Date().toISOString(),
+        cache_age_minutes: 0,
+      };
+    }
+    return null;
   }
 
   const lowestEntry = priceEntries.reduce((a, b) => (a.price <= b.price ? a : b));

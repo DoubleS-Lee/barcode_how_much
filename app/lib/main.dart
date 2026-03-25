@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:kakao_flutter_sdk_share/kakao_flutter_sdk_share.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/theme.dart';
 import 'core/router.dart';
+import 'firebase_options.dart';
 import 'shared/services/notification_service.dart';
 import 'shared/services/fcm_service.dart';
 import 'shared/utils/device_id.dart';
@@ -18,10 +20,16 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
 
-  // Kakao SDK + AdMob 초기화 — Android/iOS에서만 실행
+  // Firebase 초기화 — Android/iOS에서만 실행
   if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS)) {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     KakaoSdk.init(nativeAppKey: kKakaoNativeAppKey);
+    // 임시: 카카오 키 해시 확인용 (등록 후 삭제)
+    final keyHash = await KakaoSdk.origin;
+    debugPrint('🔑 Kakao Key Hash: $keyHash');
     await MobileAds.instance.initialize();
   }
 

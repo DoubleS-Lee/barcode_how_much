@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-/// 서버 Base URL — Windows 개발 환경
-const kBaseUrl = 'http://localhost:3000';
+/// 서버 Base URL — 실기기 테스트용 (PC와 같은 와이파이 필요)
+const kBaseUrl = 'http://192.168.219.110:3000';
 
 /// Dio 싱글톤 클라이언트
 final dio = Dio(
@@ -14,8 +14,8 @@ final dio = Dio(
   ),
 )..interceptors.add(
     LogInterceptor(
-      requestBody: false,
-      responseBody: false,
+      requestBody: true,
+      responseBody: true,
       logPrint: (o) => debugPrint('[API] $o'),
     ),
   );

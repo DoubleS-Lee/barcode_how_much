@@ -11,7 +11,11 @@ class ScanFeedback {
     required bool sound,
     required bool vibration,
   }) async {
-    if (vibration) HapticFeedback.mediumImpact();
+    if (vibration) {
+      HapticFeedback.heavyImpact();
+      await Future.delayed(const Duration(milliseconds: 80));
+      HapticFeedback.heavyImpact();
+    }
     if (sound) {
       _beepBytes ??= _buildBeepWav();
       try {

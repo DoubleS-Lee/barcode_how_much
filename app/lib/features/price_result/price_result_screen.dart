@@ -78,7 +78,16 @@ class PriceResultScreen extends ConsumerWidget {
             onRetry: () => ref.invalidate(priceResultProvider(barcode)),
           );
         },
-        data: (data) => _PriceResultBody(barcode: barcode, data: data),
+        data: (data) {
+          final prices = (data['prices'] as List?)?.cast<Map>() ?? [];
+          if (prices.isEmpty) {
+            return _NoPriceView(
+              barcode: barcode,
+              productName: (data['product_name'] as String?) ?? barcode,
+            );
+          }
+          return _PriceResultBody(barcode: barcode, data: data);
+        },
       ),
     );
   }
@@ -302,14 +311,20 @@ class _PriceResultBody extends ConsumerWidget {
             SizedBox(
               width: double.infinity,
               height: 50,
-              child: OutlinedButton.icon(
+              child: ElevatedButton.icon(
                 icon: const Icon(Icons.storefront_outlined, size: 18),
                 label: Text(
                   '마트 현재 가격 직접 입력',
-                  style:
-                      GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
                 ),
                 onPressed: () => context.push('/manual-price/$barcode'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -390,7 +405,7 @@ class _PriceResultBody extends ConsumerWidget {
                       SizedBox(
                         width: double.infinity,
                         height: 52,
-                        child: ElevatedButton(
+                        child: OutlinedButton(
                           onPressed: () async {
                             final url = lowest['url'] as String?;
                             if (url != null && url.isNotEmpty) {
@@ -409,13 +424,20 @@ class _PriceResultBody extends ConsumerWidget {
                               );
                             }
                           },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kOnSurface,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
                                 '최저가로 구매하기',
                                 style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 16, fontWeight: FontWeight.w700),
+                                    fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(width: 6),
                               const Icon(Icons.arrow_forward, size: 16),
@@ -1033,6 +1055,105 @@ class _ComparisonCard extends StatelessWidget {
 }
 
 // ── Scenario 2: 바코드로 상품을 못 찾았을 때 ─────────────────────────────
+
+// ── 상품명은 있지만 가격 정보가 없을 때 ──────────────────
+
+class _NoPriceView extends StatelessWidget {
+  final String barcode;
+  final String productName;
+  const _NoPriceView({required this.barcode, required this.productName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: kPrimary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.price_change_outlined,
+                  size: 36, color: kPrimary),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              productName,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: kPrimaryDark,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '온라인 가격 정보를 찾지 못했어요',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: kOnSurface,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '네이버·쿠팡에 등록되지 않은 상품이에요.\n마트에서 직접 가격을 입력해두면\n다음번 비교에 활용할 수 있어요.',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: kOnSurfaceVariant,
+                height: 1.6,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => context.push('/manual-price/$barcode'),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: Text(
+                  '마트 가격 직접 입력하기',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => context.pop(),
+              child: Text(
+                '다른 바코드 스캔하기',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: kOnSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _ProductNotFoundView extends StatefulWidget {
   final String barcode;
