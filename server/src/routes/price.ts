@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getCached, setCache, getCacheKey } from '../cache/redis';
 import { PriceResponse } from '../types/price.types';
 import { priceOrchestrator } from '../services/price-orchestrator.service';
+import { searchNaverCandidates } from '../services/naver.service';
 import prisma from '../db/prisma';
 
 const router = Router();
@@ -92,6 +93,63 @@ router.patch('/products/:barcode', async (req: Request, res: Response) => {
   });
 
   return res.json({ barcode: product.barcode, name: product.name });
+});
+
+// GET /api/v1/price/naver-candidates?name=... — 상품명으로 네이버 후보 목록 반환
+router.get('/naver-candidates', async (req: Request, res: Response) => {
+  const name = (req.query.name as string)?.trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  const candidates = await searchNaverCandidates(name, 7);
+  return res.json({ candidates });
+});
+
+// POST /api/v1/price/relink-naver — 유저가 선택한 네이버 상품으로 최신 스캔 가격 교체
+router.post('/relink-naver', async (req: Request, res: Response) => {
+  const schema = z.object({
+    device_uuid: z.string().uuid(),
+    barcode: z.string().min(1),
+    product_name: z.string().min(1).max(500),
+    price: z.number().int().positive(),
+    shopping_url: z.string().url(),
+    image_url: z.string().nullable().optional(),
+  });
+  const result = schema.safeParse(req.body);
+  if (!result.success) return res.status(400).json({ error: 'INVALID_PARAMS' });
+
+  const { device_uuid, barcode, product_name, price, shopping_url, image_url } = result.data;
+
+  const device = await prisma.device.findUnique({ where: { deviceUuid: device_uuid } });
+  if (!device) return res.status(404).json({ error: 'DEVICE_NOT_FOUND' });
+
+  // 해당 기기의 해당 바코드 최신 스캔
+  const latestScan = await prisma.scan.findFirst({
+    where: { deviceId: device.id, barcode, scanType: 'product' },
+    orderBy: { scannedAt: 'desc' },
+  });
+  if (!latestScan) return res.status(404).json({ error: 'SCAN_NOT_FOUND' });
+
+  // 기존 Naver 온라인 가격 삭제 후 새 가격으로 교체
+  await prisma.onlinePrice.deleteMany({
+    where: { scanId: latestScan.id, platform: 'naver' },
+  });
+  await prisma.onlinePrice.create({
+    data: {
+      scanId: latestScan.id,
+      platform: 'naver',
+      price,
+      isLowest: true,
+    },
+  });
+
+  // 상품명도 업데이트
+  await prisma.product.upsert({
+    where: { barcode },
+    update: { name: product_name, imageUrl: image_url ?? undefined },
+    create: { barcode, name: product_name, imageUrl: image_url ?? null },
+  });
+
+  return res.json({ ok: true });
 });
 
 export default router;

@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:dio/dio.dart';
 import 'api_client.dart';
 
 class ScanApi {
@@ -83,6 +85,54 @@ class ScanApi {
       queryParameters: {'device_uuid': deviceUuid},
     );
     return (response.data as Map)['deleted'] as int? ?? 0;
+  }
+
+  /// GET /api/v1/price/naver-candidates?name=... — 네이버 후보 목록
+  static Future<List<Map<String, dynamic>>> getNaverCandidates(String name) async {
+    final response = await dio.get('/api/v1/price/naver-candidates', queryParameters: {'name': name});
+    final list = (response.data as Map)['candidates'] as List? ?? [];
+    // 서버 키(camelCase) → Flutter용 snake_case로 변환
+    return list.map<Map<String, dynamic>>((item) => {
+      'product_name': item['productName'] ?? '',
+      'price': item['price'] ?? 0,
+      'image_url': item['imageUrl'],
+      'shopping_url': item['shoppingUrl'] ?? '',
+      'mall_name': item['mallName'] ?? '',
+    }).toList();
+  }
+
+  /// POST /api/v1/price/relink-naver — 선택한 네이버 상품으로 가격 교체
+  static Future<void> relinkNaver({
+    required String deviceUuid,
+    required String barcode,
+    required String productName,
+    required int price,
+    required String shoppingUrl,
+    String? imageUrl,
+  }) async {
+    await dio.post('/api/v1/price/relink-naver', data: {
+      'device_uuid': deviceUuid,
+      'barcode': barcode,
+      'product_name': productName,
+      'price': price,
+      'shopping_url': shoppingUrl,
+      if (imageUrl != null) 'image_url': imageUrl,
+    });
+  }
+
+  /// PUT /api/v1/scans/products/:barcode/image — 상품 대표 이미지 업로드
+  static Future<String> uploadProductImage({
+    required String barcode,
+    required File imageFile,
+  }) async {
+    final formData = FormData.fromMap({
+      'image': await MultipartFile.fromFile(imageFile.path, filename: 'product.jpg'),
+    });
+    final response = await dio.put(
+      '/api/v1/scans/products/$barcode/image',
+      data: formData,
+    );
+    return (response.data as Map)['image_url'] as String;
   }
 
   /// GET /api/v1/scans/products/:barcode/price-history

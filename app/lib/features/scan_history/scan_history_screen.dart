@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
+import '../../shared/utils/device_id.dart';
+import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 import '../price_result/recommend_provider.dart';
 import 'scan_history_provider.dart';
@@ -394,6 +397,172 @@ Future<void> _showEditNameDialog(
   }
 }
 
+// ── 이름 기반 가격 재검색 (네이버 후보 선택) ──────────────
+
+Future<void> _repricingByName(
+  BuildContext context,
+  WidgetRef ref,
+  String barcode,
+  String productName,
+) async {
+  // 후보 로딩 중 바텀시트
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (ctx) => _NaverCandidateSheet(
+      barcode: barcode,
+      productName: productName,
+      onSelected: () {
+        ref.invalidate(scanHistoryProvider);
+      },
+    ),
+  );
+}
+
+class _NaverCandidateSheet extends StatefulWidget {
+  final String barcode;
+  final String productName;
+  final VoidCallback onSelected;
+
+  const _NaverCandidateSheet({
+    required this.barcode,
+    required this.productName,
+    required this.onSelected,
+  });
+
+  @override
+  State<_NaverCandidateSheet> createState() => _NaverCandidateSheetState();
+}
+
+class _NaverCandidateSheetState extends State<_NaverCandidateSheet> {
+  List<Map<String, dynamic>>? _candidates;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final candidates = await ScanApi.getNaverCandidates(widget.productName);
+      if (mounted) setState(() { _candidates = candidates; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+    }
+  }
+
+  Future<void> _select(Map<String, dynamic> candidate) async {
+    final deviceUuid = await DeviceId.get();
+    if (!mounted) return;
+    Navigator.pop(context);
+    try {
+      await ScanApi.relinkNaver(
+        deviceUuid: deviceUuid,
+        barcode: widget.barcode,
+        productName: candidate['product_name'] as String,
+        price: candidate['price'] as int,
+        shoppingUrl: candidate['shopping_url'] as String,
+        imageUrl: candidate['image_url'] as String?,
+      );
+      widget.onSelected();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('가격이 업데이트됐어요!'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('업데이트 실패: $e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nf = NumberFormat('#,###');
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      maxChildSize: 0.92,
+      minChildSize: 0.4,
+      expand: false,
+      builder: (_, controller) => Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('네이버 상품 선택', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('"${widget.productName}" 검색 결과에서 올바른 상품을 선택해주세요.',
+                style: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant)),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(child: Text('검색 실패: $_error', style: GoogleFonts.inter(color: kOnSurfaceVariant)))
+                    : _candidates == null || _candidates!.isEmpty
+                        ? Center(child: Text('검색 결과가 없어요.', style: GoogleFonts.inter(color: kOnSurfaceVariant)))
+                        : ListView.separated(
+                            controller: controller,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: _candidates!.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
+                            itemBuilder: (_, i) {
+                              final c = _candidates![i];
+                              final name = c['product_name'] as String;
+                              final price = c['price'] as int;
+                              final imageUrl = c['image_url'] as String?;
+                              final mallName = c['mall_name'] as String? ?? '';
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: imageUrl != null
+                                      ? Image.network(imageUrl, width: 56, height: 56, fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => _imagePlaceholder())
+                                      : _imagePlaceholder(),
+                                ),
+                                title: Text(name,
+                                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  const SizedBox(height: 2),
+                                  Text('${nf.format(price)}원',
+                                    style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w800, color: kPrimary)),
+                                  if (mallName.isNotEmpty)
+                                    Text(mallName, style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant)),
+                                ]),
+                                onTap: () => _select(c),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _imagePlaceholder() => Container(
+    width: 56, height: 56,
+    color: Colors.grey.shade100,
+    child: const Icon(Icons.image_outlined, color: Colors.grey),
+  );
+}
+
 // ── 상품 이미지 / 아바타 ──────────────────────────────────
 
 class _ProductAvatar extends StatelessWidget {
@@ -466,6 +635,66 @@ class _GroupedProductCard extends StatefulWidget {
 
 class _GroupedProductCardState extends State<_GroupedProductCard> {
   bool _showHistory = false;
+  bool _uploadingImage = false;
+
+  Future<void> _pickProductImage() async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 12),
+          ListTile(
+            leading: const Icon(Icons.camera_alt_outlined),
+            title: Text('카메라로 촬영', style: GoogleFonts.inter()),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text('갤러리에서 선택', style: GoogleFonts.inter()),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+          if (widget.group.imageUrl != null)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: Text('사진 삭제', style: GoogleFonts.inter(color: Colors.red)),
+              onTap: () => Navigator.pop(ctx, null),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (!mounted) return;
+
+    if (source == null && widget.group.imageUrl != null) {
+      // 삭제 선택 시 — 현재 미구현, 필요 시 추가
+      return;
+    }
+    if (source == null) return;
+
+    final picked = await picker.pickImage(source: source, imageQuality: 90);
+    if (picked == null || !mounted) return;
+
+    setState(() => _uploadingImage = true);
+    try {
+      final compressed = await compressImage(File(picked.path));
+      await ScanApi.uploadProductImage(barcode: widget.group.barcode, imageFile: compressed);
+      widget.ref.invalidate(scanHistoryProvider);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingImage = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -503,74 +732,53 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
           childrenPadding: EdgeInsets.zero,
           shape: const Border(),
           collapsedShape: const Border(),
-          title: Row(children: [
-            Expanded(
-              child: Text(
-                group.name,
-                style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: kOnSurface),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+          leading: GestureDetector(
+            onTap: _pickProductImage,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _ProductAvatar(imageUrl: group.imageUrl, name: group.name, size: 48),
+                if (_uploadingImage)
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: const ColoredBox(
+                        color: Colors.black38,
+                        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: kPrimary,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    child: const Icon(Icons.camera_alt, size: 10, color: Colors.white),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 4),
-            // 찜 버튼
-            GestureDetector(
-              onTap: () => ref.read(favoritesProvider.notifier).toggle(group.barcode),
-              child: Icon(
-                isFav ? Icons.star_rounded : Icons.star_outline_rounded,
-                size: 20,
-                color: isFav ? kAmber : kOnSurfaceVariant.withValues(alpha: 0.5),
-              ),
-            ),
-            const SizedBox(width: 4),
-            // 상품명 편집 버튼
-            GestureDetector(
-              onTap: () => _showEditNameDialog(context, ref, group.barcode, group.name),
-              child: Icon(Icons.edit_outlined, size: 15, color: kOnSurfaceVariant.withValues(alpha: 0.6)),
-            ),
-            const SizedBox(width: 4),
-            // 상품 그룹 삭제 버튼
-            GestureDetector(
-              onTap: () => _confirmGroupDelete(context, ref, group),
-              child: Icon(Icons.delete_outline, size: 15, color: kError.withValues(alpha: 0.5)),
-            ),
-            const SizedBox(width: 8),
-            // 스캔 횟수 뱃지
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: kOnSurfaceVariant.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$scanCount회 스캔',
-                style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: kOnSurfaceVariant),
-              ),
-            ),
-          ]),
+          ),
+          title: Text(
+            group.name,
+            style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: kOnSurface),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 바코드 번호
+                // 가격
                 Row(children: [
-                  const Icon(Icons.barcode_reader, size: 11, color: kOnSurfaceVariant),
-                  const SizedBox(width: 4),
-                  Text(
-                    group.barcode,
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: kOnSurfaceVariant,
-                      letterSpacing: 0.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 4),
-                // 가격 + 날짜
-                Row(children: [
-                  Wrap(spacing: 6, runSpacing: 2, children: [
+                  Flexible(child: Wrap(spacing: 6, runSpacing: 2, children: [
                     // 온라인 가격 (더 싸면 음영)
                     if (latestOnlinePrice != null)
                       headerOnlineCheaper
@@ -599,12 +807,12 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                '마트 ${nf.format(latestOfflinePrice)}원',
+                                '오프라인 ${nf.format(latestOfflinePrice)}원',
                                 style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: kAmber),
                               ),
                             )
                           : Text(
-                              '마트 ${nf.format(latestOfflinePrice)}원',
+                              '오프라인 ${nf.format(latestOfflinePrice)}원',
                               style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: kAmber),
                             ),
                     // 온/오프 모두 없을 때 대비
@@ -613,11 +821,55 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
                         '최근 ${nf.format(latestPrice)}원',
                         style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: kPrimary),
                       ),
-                  ]),
+                  ])),
+                ]),
+                const SizedBox(height: 6),
+                // 액션 버튼 행
+                Row(children: [
+                  // 찜 버튼
+                  GestureDetector(
+                    onTap: () => ref.read(favoritesProvider.notifier).toggle(group.barcode),
+                    child: Icon(
+                      isFav ? Icons.star_rounded : Icons.star_outline_rounded,
+                      size: 18,
+                      color: isFav ? kAmber : kOnSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // 상품명 편집 버튼
+                  GestureDetector(
+                    onTap: () => _showEditNameDialog(context, ref, group.barcode, group.name),
+                    child: Icon(Icons.edit_outlined, size: 16, color: kOnSurfaceVariant.withValues(alpha: 0.6)),
+                  ),
+                  const SizedBox(width: 10),
+                  // 가격 재검색 버튼
+                  GestureDetector(
+                    onTap: () => _repricingByName(context, ref, group.barcode, group.name),
+                    child: Icon(Icons.search, size: 16, color: kPrimary.withValues(alpha: 0.7)),
+                  ),
+                  const SizedBox(width: 10),
+                  // 상품 그룹 삭제 버튼
+                  GestureDetector(
+                    onTap: () => _confirmGroupDelete(context, ref, group),
+                    child: Icon(Icons.delete_outline, size: 16, color: kError.withValues(alpha: 0.5)),
+                  ),
                   const Spacer(),
+                  // 스캔 횟수 뱃지
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kOnSurfaceVariant.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$scanCount회 스캔',
+                      style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: kOnSurfaceVariant),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   Text(
                     DateFormat('MM.dd').format(group.latestScannedAt.toLocal()),
-                    style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                    style: GoogleFonts.inter(fontSize: 10, color: kOnSurfaceVariant),
                   ),
                 ]),
               ],
@@ -651,7 +903,7 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    isOnlineCheaper ? '(온라인이 저렴)' : '(마트가 저렴)',
+                    isOnlineCheaper ? '(온라인이 저렴)' : '(오프라인이 저렴)',
                     style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
                   ),
                 ]),
@@ -712,8 +964,8 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
             else
               const SizedBox(height: 12),
 
-            // 유사 상품 추천
-            _HistoryRecommendSection(barcode: group.barcode, productName: group.name, nf: nf, ref: ref),
+            // 유사 상품 추천 (추후 활성화)
+            // _HistoryRecommendSection(barcode: group.barcode, productName: group.name, nf: nf, ref: ref),
           ],
         ),
       ),

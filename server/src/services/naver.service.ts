@@ -10,6 +10,14 @@ export interface NaverResult {
   shoppingUrl: string;
 }
 
+export interface NaverCandidate {
+  productName: string;
+  price: number;
+  imageUrl: string | null;
+  shoppingUrl: string;
+  mallName: string;
+}
+
 // 네이버 쇼핑 API 단일 호출 (내부 헬퍼)
 async function naverApiSearch(
   query: string,
@@ -43,6 +51,38 @@ async function naverApiSearch(
     imageUrl: top.image || null,
     shoppingUrl: top.link,
   };
+}
+
+// 상품명으로 여러 결과 반환 (유저 선택용)
+export async function searchNaverCandidates(name: string, count = 7): Promise<NaverCandidate[]> {
+  const clientId = process.env.NAVER_CLIENT_ID ?? '';
+  const clientSecret = process.env.NAVER_CLIENT_SECRET ?? '';
+  if (!clientId || clientId === 'your_client_id_here') return [];
+
+  const timeout = parseInt(process.env.API_TIMEOUT_MS || '3000');
+
+  const response = await axios.get(
+    'https://openapi.naver.com/v1/search/shop.json',
+    {
+      params: { query: name, display: count, sort: 'sim' },
+      headers: {
+        'X-Naver-Client-Id': clientId,
+        'X-Naver-Client-Secret': clientSecret,
+      },
+      timeout,
+    }
+  );
+
+  const items: any[] = response.data?.items ?? [];
+  return items
+    .map((item) => ({
+      productName: item.title.replace(/<[^>]+>/g, ''),
+      price: parseInt(item.lprice) || 0,
+      imageUrl: item.image || null,
+      shoppingUrl: item.link,
+      mallName: item.mallName || '',
+    }))
+    .filter((c) => c.price > 0);
 }
 
 // barcode: 조회용 바코드, productName: 이미 확보된 상품명 (있으면 1번만 검색)

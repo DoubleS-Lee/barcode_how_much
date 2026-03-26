@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
 import '../../shared/utils/device_id.dart';
+import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 
 // ── 프로바이더 ────────────────────────────────────────────
@@ -341,11 +342,39 @@ class _PostCardState extends ConsumerState<_PostCard> {
           ]),
           const SizedBox(height: 6),
           const SizedBox(height: 4),
-          Text(
-            '${NumberFormat('#,###').format(_post.price)}원',
-            style: GoogleFonts.plusJakartaSans(
-                fontSize: 16, fontWeight: FontWeight.w800, color: kPrimary),
-          ),
+          Row(children: [
+            Text(
+              '${NumberFormat('#,###').format(_post.price)}원',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 16, fontWeight: FontWeight.w800, color: kPrimary),
+            ),
+            if (_post.shareLocation) ...[
+              const Spacer(),
+              Container(
+                constraints: const BoxConstraints(maxWidth: 130),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF16A34A).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.place_outlined, size: 10, color: Color(0xFF16A34A)),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(
+                      _post.locationHint ?? '위치 공개',
+                      style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF16A34A)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ]),
+              ),
+            ],
+          ]),
           const SizedBox(height: 6),
           Text(
             _post.content,
@@ -369,30 +398,6 @@ class _PostCardState extends ConsumerState<_PostCard> {
                     fontSize: 10, fontWeight: FontWeight.w600, color: kPrimary),
               ),
             ),
-            if (_post.shareLocation) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF16A34A).withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(children: [
-                  const Icon(Icons.place_outlined,
-                      size: 10, color: Color(0xFF16A34A)),
-                  const SizedBox(width: 3),
-                  Text(
-                    _post.locationHint ?? '위치 공개',
-                    style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF16A34A)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ]),
-              ),
-            ],
             const Spacer(),
             // 조회수
             Icon(Icons.visibility_outlined,
@@ -1287,10 +1292,11 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1280);
+    final picked = await picker.pickImage(source: source, imageQuality: 90);
     if (picked != null && mounted) {
+      final compressed = await compressImage(File(picked.path));
       setState(() {
-        _imageFile = File(picked.path);
+        _imageFile = compressed;
         _existingImageUrl = null; // 새 이미지로 교체
       });
     }

@@ -1,6 +1,27 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import prisma from '../db/prisma';
+
+// 상품 이미지 업로드 디렉토리
+const productUploadDir = path.join(__dirname, '..', '..', 'uploads', 'products');
+if (!fs.existsSync(productUploadDir)) fs.mkdirSync(productUploadDir, { recursive: true });
+
+const productImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, productUploadDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      cb(null, `${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, ['image/jpeg', 'image/png', 'image/webp', 'image/heic'].includes(file.mimetype));
+  },
+});
 
 const router = Router();
 
@@ -281,6 +302,23 @@ router.delete('/:scanId', async (req: Request, res: Response) => {
   await prisma.scan.delete({ where: { id: scanId } });
 
   return res.json({ deleted: 1 });
+});
+
+// PUT /api/v1/scans/products/:barcode/image — 상품 대표 이미지 업로드
+router.put('/products/:barcode/image', productImageUpload.single('image'), async (req: Request, res: Response) => {
+  const { barcode } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'NO_FILE' });
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const imageUrl = `${baseUrl}/uploads/products/${req.file.filename}`;
+
+  await prisma.product.upsert({
+    where: { barcode },
+    update: { imageUrl },
+    create: { barcode, name: barcode, imageUrl },
+  });
+
+  return res.json({ image_url: imageUrl });
 });
 
 export default router;

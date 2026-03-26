@@ -58,6 +58,7 @@ dependencies:
   google_sign_in: ^6.2.1
   kakao_flutter_sdk_user: ^1.9.7
   flutter_naver_login: ^2.1.1
+  flutter_image_compress: ^2.3.0
 
 dev_dependencies:
   flutter_test:
