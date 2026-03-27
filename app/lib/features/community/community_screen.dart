@@ -1,6 +1,7 @@
 ﻿import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import 'package:kakao_flutter_sdk_share/kakao_flutter_sdk_share.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
@@ -142,10 +144,43 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
         label: Text('글쓰기',
             style: GoogleFonts.plusJakartaSans(
                 color: Colors.white, fontWeight: FontWeight.w700)),
-        onPressed: () => _showPostDialog(context),
+        onPressed: () => _onWriteTap(context),
       ),
       bottomNavigationBar: const AppBottomNav(currentIndex: 2),
     );
+  }
+
+  void _onWriteTap(BuildContext context) {
+    final isLoggedIn = ref.read(authProvider).valueOrNull?.isLoggedIn ?? false;
+    if (!isLoggedIn) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('로그인이 필요해요',
+              style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+          content: Text(
+            '공유 게시판 글쓰기는\n소셜 로그인 후 이용할 수 있어요.',
+            style: GoogleFonts.inter(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                context.push('/settings');
+              },
+              child: Text('로그인하러 가기', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    _showPostDialog(context);
   }
 
   void _showPostDialog(BuildContext context, {PostModel? editing}) {
@@ -362,7 +397,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
                   const SizedBox(width: 3),
                   Flexible(
                     child: Text(
-                      _post.locationHint ?? '위치 공개',
+                      _post.locationHint ?? '장소 공개',
                       style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
@@ -862,7 +897,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                               size: 14, color: Color(0xFF16A34A)),
                           const SizedBox(width: 4),
                           Text(
-                            _post.locationHint ?? '위치 공개',
+                            _post.locationHint ?? '장소 공개',
                             style: GoogleFonts.inter(
                                 fontSize: 12,
                                 color: const Color(0xFF16A34A),
@@ -1471,7 +1506,7 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
               ),
               const SizedBox(height: 4),
 
-              // ── 위치 ──
+              // ── 장소 ──
               TextField(
                 controller: _locationHintCtrl,
                 decoration: InputDecoration(

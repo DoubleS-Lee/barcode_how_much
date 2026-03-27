@@ -14,6 +14,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export async function priceOrchestrator(
   barcode: string,
   knownProductName?: string,
+  linkedNaverEntry?: { url: string; price: number },
 ): Promise<PriceResponse | null> {
   const timeout = parseInt(process.env.API_TIMEOUT_MS || '3000');
   const hasCoupangKey = !!(process.env.COUPANG_ACCESS_KEY &&
@@ -59,16 +60,22 @@ export async function priceOrchestrator(
   }
 
   // Phase 2: 네이버 검색
+  // - linkedNaverEntry 있으면: 사용자가 직접 연결한 상품 사용 (검색 스킵)
   // - lookupName 있으면: 상품명으로 바로 검색 (1회)
   // - lookupName 없으면: 바코드→상품명→재검색 2단계 (시간 더 필요)
-  const naverTimeout = lookupName ? timeout : timeout * 2;
-  const [naverSettled] = await Promise.allSettled([
-    withTimeout(searchNaver(barcode, lookupName), naverTimeout),
-  ]);
-  const naverResult = naverSettled.status === 'fulfilled' ? naverSettled.value : null;
-
-  if (naverSettled.status === 'rejected') {
-    console.warn('[Orchestrator] Naver failed:', (naverSettled.reason as Error)?.message);
+  let naverResult = null;
+  if (linkedNaverEntry) {
+    console.log(`[Orchestrator] Using user-linked Naver product: ${linkedNaverEntry.price}원`);
+    naverResult = { price: linkedNaverEntry.price, shoppingUrl: linkedNaverEntry.url, productName: knownProductName || '', imageUrl: null };
+  } else {
+    const naverTimeout = lookupName ? timeout : timeout * 2;
+    const [naverSettled] = await Promise.allSettled([
+      withTimeout(searchNaver(barcode, lookupName), naverTimeout),
+    ]);
+    naverResult = naverSettled.status === 'fulfilled' ? naverSettled.value : null;
+    if (naverSettled.status === 'rejected') {
+      console.warn('[Orchestrator] Naver failed:', (naverSettled.reason as Error)?.message);
+    }
   }
 
   // 쿠팡/네이버 모두 실패 → lookupName만 있으면 최소 반환
@@ -89,13 +96,14 @@ export async function priceOrchestrator(
   }
 
   // 최종 결과 조합
-  // 상품명 우선순위: 네이버 > 쿠팡(실제키) > 식약처 > OFF > 자체DB
+  // 상품명 우선순위: 자체DB(사용자 수동 수정) > 네이버 > 쿠팡(실제키) > 식약처 > OFF
+  // knownProductName이 있으면 (사용자가 직접 수정한 이름) 항상 최우선 사용
   const productName =
-    naverResult?.productName
+    knownProductName
+    || naverResult?.productName
     || (hasCoupangKey ? coupangResult?.productName : undefined)
     || foodSafetyResult?.productName
     || offResult?.productName
-    || knownProductName
     || '';
 
   // 이미지 우선순위: 네이버 > 쿠팡(실제키) > OFF

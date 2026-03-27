@@ -11,12 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
 import '../scan_history/scan_history_provider.dart';
+import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/scan_settings_provider.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
-
-// 알림 설정 상태
-final _notifyPriceDropProvider = StateProvider<bool>((ref) => true);
 
 // 디바이스 UUID
 final _deviceUuidProvider = FutureProvider<String>((ref) => DeviceId.get());
@@ -47,18 +45,6 @@ class SettingsScreen extends ConsumerWidget {
           children: [
             // 소셜 로그인
             _SocialLoginSection(),
-            const SizedBox(height: 28),
-
-            // 알림 설정
-            _SectionTitle('알림'),
-            const SizedBox(height: 10),
-            _ToggleTile(
-              icon: Icons.trending_down,
-              iconColor: Colors.green.shade600,
-              title: '가격 하락 알림',
-              subtitle: '★ 찜한 상품 가격이 내려가면 알려드려요',
-              provider: _notifyPriceDropProvider,
-            ),
             const SizedBox(height: 28),
 
             // 스캔 피드백
@@ -179,49 +165,15 @@ class SettingsScreen extends ConsumerWidget {
 
 // ── 소셜 로그인 섹션 ──────────────────────────────────────
 
-class _SocialLoginSection extends StatefulWidget {
+class _SocialLoginSection extends ConsumerStatefulWidget {
   @override
-  State<_SocialLoginSection> createState() => _SocialLoginSectionState();
+  ConsumerState<_SocialLoginSection> createState() => _SocialLoginSectionState();
 }
 
-class _SocialLoginSectionState extends State<_SocialLoginSection> {
-  String? _loginType;   // google / kakao / naver
-  String? _loginName;
-  String? _loginEmail;
+class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
   bool _loading = false;
 
   final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSaved();
-  }
-
-  Future<void> _loadSaved() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _loginType = prefs.getString('social_login_type');
-      _loginName = prefs.getString('social_login_name');
-      _loginEmail = prefs.getString('social_login_email');
-    });
-  }
-
-  Future<void> _saveLogin(String type, String name, String email) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('social_login_type', type);
-    await prefs.setString('social_login_name', name);
-    await prefs.setString('social_login_email', email);
-    setState(() { _loginType = type; _loginName = name; _loginEmail = email; });
-  }
-
-  Future<void> _clearLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('social_login_type');
-    await prefs.remove('social_login_name');
-    await prefs.remove('social_login_email');
-    setState(() { _loginType = null; _loginName = null; _loginEmail = null; });
-  }
 
   Future<void> _loginGoogle() async {
     if (kIsWeb || (!defaultTargetPlatform.isMobileOrMac)) {
@@ -232,7 +184,8 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
     try {
       final account = await _googleSignIn.signIn();
       if (account != null && mounted) {
-        await _saveLogin('google', account.displayName ?? account.email, account.email);
+        await ref.read(authProvider.notifier).setLogin(
+          'google', account.displayName ?? account.email, account.email);
       }
     } catch (e) {
       if (mounted) _showSnack('구글 로그인 실패: $e');
@@ -256,7 +209,7 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
       final user = await kakao.UserApi.instance.me();
       final name = user.kakaoAccount?.profile?.nickname ?? '카카오 사용자';
       final email = user.kakaoAccount?.email ?? '';
-      if (mounted) await _saveLogin('kakao', name, email);
+      if (mounted) await ref.read(authProvider.notifier).setLogin('kakao', name, email);
     } catch (e) {
       if (mounted) _showSnack('카카오 로그인 실패: $e');
     } finally {
@@ -274,7 +227,8 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
       final result = await FlutterNaverLogin.logIn();
       final account = result.account;
       if (account != null && mounted) {
-        await _saveLogin('naver', account.name ?? '네이버 사용자', account.email ?? '');
+        await ref.read(authProvider.notifier).setLogin(
+          'naver', account.name ?? '네이버 사용자', account.email ?? '');
       }
     } catch (e) {
       if (mounted) _showSnack('네이버 로그인 실패: $e');
@@ -284,14 +238,15 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
   }
 
   Future<void> _logout() async {
+    final loginType = ref.read(authProvider).valueOrNull?.loginType;
     setState(() => _loading = true);
     try {
-      if (_loginType == 'google') await _googleSignIn.signOut();
-      if (_loginType == 'kakao') await kakao.UserApi.instance.logout();
-      if (_loginType == 'naver') await FlutterNaverLogin.logOut();
-      if (mounted) await _clearLogin();
+      if (loginType == 'google') await _googleSignIn.signOut();
+      if (loginType == 'kakao') await kakao.UserApi.instance.logout();
+      if (loginType == 'naver') await FlutterNaverLogin.logOut();
+      if (mounted) await ref.read(authProvider.notifier).logout();
     } catch (_) {
-      if (mounted) await _clearLogin();
+      if (mounted) await ref.read(authProvider.notifier).logout();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -309,7 +264,8 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loginType != null) {
+    final auth = ref.watch(authProvider).valueOrNull;
+    if (auth?.isLoggedIn == true) {
       // 로그인된 상태
       return Container(
         padding: const EdgeInsets.all(20),
@@ -320,15 +276,15 @@ class _SocialLoginSectionState extends State<_SocialLoginSection> {
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            _LoginIcon(_loginType!),
+            _LoginIcon(auth!.loginType!),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_loginName ?? '사용자',
+              Text(auth.loginName ?? '사용자',
                   style: GoogleFonts.plusJakartaSans(
                       fontSize: 15, fontWeight: FontWeight.w700, color: kOnSurface)),
-              if (_loginEmail?.isNotEmpty == true) ...[
+              if (auth.loginEmail?.isNotEmpty == true) ...[
                 const SizedBox(height: 2),
-                Text(_loginEmail!,
+                Text(auth.loginEmail!,
                     style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
               ],
             ])),
@@ -497,38 +453,6 @@ class _SectionTitle extends StatelessWidget {
         fontWeight: FontWeight.w700,
         color: kOnSurfaceVariant,
         letterSpacing: 0.5,
-      ),
-    );
-  }
-}
-
-class _ToggleTile extends ConsumerWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final StateProvider<bool> provider;
-
-  const _ToggleTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    required this.provider,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final value = ref.watch(provider);
-    return _TileShell(
-      icon: icon,
-      iconColor: iconColor,
-      title: title,
-      subtitle: subtitle,
-      trailing: Switch(
-        value: value,
-        onChanged: (v) => ref.read(provider.notifier).state = v,
-        activeColor: kPrimary,
       ),
     );
   }

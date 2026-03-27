@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
-import '../../shared/services/notification_service.dart';
 import '../price_result/price_result_provider.dart';
 import '../scan_history/scan_history_provider.dart';
 // liveOfflinePriceProvider - 스캔 기록 배너 즉각 반영
 
 class ManualPriceScreen extends ConsumerStatefulWidget {
   final String barcode;
-  const ManualPriceScreen({super.key, required this.barcode});
+  final String? initialStore;
+  final String? initialMemo;
+  const ManualPriceScreen({super.key, required this.barcode, this.initialStore, this.initialMemo});
 
   @override
   ConsumerState<ManualPriceScreen> createState() => _ManualPriceScreenState();
@@ -24,11 +23,8 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
   String _input = '';
   String _promotion = '없음';
   bool _isLoading = false;
-  bool _locationLoading = false;
   final _storeCtrl = TextEditingController();
   final _memoCtrl = TextEditingController();
-  double? _latitude;
-  double? _longitude;
 
   int get _unitPrice {
     if (_input.isEmpty) return 0;
@@ -44,51 +40,8 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchLocation();
-  }
-
-  Future<void> _fetchLocation() async {
-    setState(() => _locationLoading = true);
-    try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) return;
-
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          timeLimit: Duration(seconds: 8),
-        ),
-      );
-      if (!mounted) return;
-      setState(() {
-        _latitude = pos.latitude;
-        _longitude = pos.longitude;
-      });
-
-      // 역지오코딩 → 매장 입력칸 자동 채우기 (비어 있을 때만)
-      if (_storeCtrl.text.trim().isEmpty) {
-        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
-        if (placemarks.isNotEmpty && mounted) {
-          final p = placemarks.first;
-          final parts = [
-            p.administrativeArea,
-            p.locality,
-            p.subLocality,
-          ].where((s) => s != null && s.isNotEmpty).take(2).join(' ');
-          if (parts.isNotEmpty) {
-            setState(() => _storeCtrl.text = parts);
-          }
-        }
-      }
-    } catch (_) {
-      // 위치 못 가져와도 계속 진행
-    } finally {
-      if (mounted) setState(() => _locationLoading = false);
-    }
+    if (widget.initialStore != null) _storeCtrl.text = widget.initialStore!;
+    if (widget.initialMemo != null) _memoCtrl.text = widget.initialMemo!;
   }
 
   @override
@@ -129,24 +82,11 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
       await ScanApi.postOfflinePrice(
         scanId: scanId,
         price: offlinePrice,
-        latitude: _latitude,
-        longitude: _longitude,
         storeHint: storeHint,
         memo: memo,
       );
 
-      // 온라인이 더 싸면 알림
-      final lowestOnlinePrice = priceData?['lowest_price'] as int?;
-      if (lowestOnlinePrice != null && lowestOnlinePrice < offlinePrice) {
-        final productName = priceData?['product_name'] as String? ?? '스캔한 상품';
-        await NotificationService.showPriceDrop(
-          productName: productName,
-          onlinePrice: lowestOnlinePrice,
-          offlinePrice: offlinePrice,
-        );
-      }
-
-      // 마트 입력가를 PriceResult 화면과 공유
+      // 오프라인 입력가를 PriceResult 화면과 공유
       ref.read(offlinePriceProvider(widget.barcode).notifier).state = offlinePrice;
       // 절약 배너 즉각 반영 (바코드별)
       ref.read(liveOfflinePriceProvider(widget.barcode).notifier).state = offlinePrice;
@@ -185,7 +125,7 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
       backgroundColor: kBackground,
       appBar: AppBar(
         title: Text(
-          '마트 현재 가격 입력',
+          '오프라인 가격 직접 입력',
           style: GoogleFonts.plusJakartaSans(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -260,7 +200,7 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
             child: Column(
               children: [
                 Text(
-                  '마트 현재 가격',
+                  '오프라인 현재 가격',
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     color: kOnSurfaceVariant,
@@ -341,27 +281,11 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
                         controller: _storeCtrl,
                         style: GoogleFonts.inter(fontSize: 13),
                         decoration: InputDecoration(
-                          labelText: '매장 위치',
-                          hintText: _locationLoading ? '위치 가져오는 중...' : '이마트 왕십리점',
+                          labelText: '장소',
+                          hintText: '이마트 왕십리점',
                           hintStyle: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
                           labelStyle: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
-                          prefixIcon: _locationLoading
-                              ? const Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: SizedBox(
-                                    width: 16, height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: kPrimary),
-                                  ),
-                                )
-                              : const Icon(Icons.place_outlined, size: 16, color: kOnSurfaceVariant),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.my_location, size: 16, color: kPrimary),
-                            tooltip: '현재 위치로 다시 가져오기',
-                            onPressed: _locationLoading ? null : () {
-                              _storeCtrl.clear();
-                              _fetchLocation();
-                            },
-                          ),
+                          prefixIcon: const Icon(Icons.place_outlined, size: 16, color: kOnSurfaceVariant),
                           filled: true,
                           fillColor: kBackground,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),

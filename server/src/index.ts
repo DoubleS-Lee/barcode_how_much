@@ -11,8 +11,6 @@ import postsRouter from './routes/posts';
 import devicesRouter from './routes/devices';
 import favoritesRouter from './routes/favorites';
 import { errorHandler } from './middleware/error';
-import { startPriceAlertCron } from './services/priceAlert.service';
-
 dotenv.config();
 
 const app = express();
@@ -35,8 +33,6 @@ app.use('/api/v1/devices', devicesRouter);
 app.use('/api/v1/favorites', favoritesRouter);
 
 app.use(errorHandler);
-
-startPriceAlertCron();
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on http://localhost:${PORT}`);

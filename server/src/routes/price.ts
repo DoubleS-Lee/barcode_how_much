@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { getCached, setCache, getCacheKey } from '../cache/redis';
+import { getCached, setCache, deleteCache, getCacheKey } from '../cache/redis';
 import { PriceResponse } from '../types/price.types';
 import { priceOrchestrator } from '../services/price-orchestrator.service';
 import { searchNaverCandidates } from '../services/naver.service';
@@ -34,7 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
   // → 있으면 OFF/go-upc 호출 없이 바로 네이버 검색으로 단축
   const cachedProduct = await prisma.product.findUnique({
     where: { barcode },
-    select: { name: true },
+    select: { name: true, linkedNaverUrl: true, linkedNaverPrice: true },
   });
   // Mock 이름은 신뢰하지 않음 (개발환경 오염 방지)
   const knownProductName = cachedProduct?.name?.includes('(Mock)')
@@ -44,8 +44,13 @@ router.get('/', async (req: Request, res: Response) => {
     console.log(`[Price] Found in local DB: "${knownProductName}"`);
   }
 
+  // 사용자가 직접 연결한 네이버 상품이 있으면 그것을 우선 사용
+  const linkedNaverEntry = cachedProduct?.linkedNaverUrl && cachedProduct?.linkedNaverPrice
+    ? { url: cachedProduct.linkedNaverUrl, price: cachedProduct.linkedNaverPrice }
+    : undefined;
+
   // 3. 캐시 미스 → 병렬 API 호출 (Promise.allSettled in orchestrator)
-  const result = await priceOrchestrator(barcode, knownProductName);
+  const result = await priceOrchestrator(barcode, knownProductName, linkedNaverEntry);
 
   if (!result) {
     return res.status(404).json({
@@ -59,7 +64,8 @@ router.get('/', async (req: Request, res: Response) => {
 
   // 상품명/이미지를 products 테이블에 upsert (히스토리 표시용)
   // Mock 이름은 저장하지 않음
-  if (result.product_name && !result.product_name.includes('(Mock)')) {
+  // knownProductName이 있으면 사용자가 직접 수정한 이름 — 덮어쓰지 않음
+  if (result.product_name && !result.product_name.includes('(Mock)') && !knownProductName) {
     prisma.product.upsert({
       where: { barcode },
       update: { name: result.product_name, imageUrl: result.image_url },
@@ -91,6 +97,9 @@ router.patch('/products/:barcode', async (req: Request, res: Response) => {
     update: { name },
     create: { barcode, name },
   });
+
+  // 캐시 무효화 — 다음 스캔 시 수정된 이름으로 재검색
+  await deleteCache(getCacheKey('price', barcode)).catch(() => {});
 
   return res.json({ barcode: product.barcode, name: product.name });
 });
@@ -142,12 +151,15 @@ router.post('/relink-naver', async (req: Request, res: Response) => {
     },
   });
 
-  // 상품명도 업데이트
+  // 상품명 + 연결된 네이버 상품 저장 (재스캔 시 동일 상품 유지)
   await prisma.product.upsert({
     where: { barcode },
-    update: { name: product_name, imageUrl: image_url ?? undefined },
-    create: { barcode, name: product_name, imageUrl: image_url ?? null },
+    update: { name: product_name, imageUrl: image_url ?? undefined, linkedNaverUrl: shopping_url, linkedNaverPrice: price },
+    create: { barcode, name: product_name, imageUrl: image_url ?? null, linkedNaverUrl: shopping_url, linkedNaverPrice: price },
   });
+
+  // 캐시 무효화 — 다음 스캔 시 재연결된 상품명으로 재검색
+  await deleteCache(getCacheKey('price', barcode)).catch(() => {});
 
   return res.json({ ok: true });
 });

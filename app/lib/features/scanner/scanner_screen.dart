@@ -8,7 +8,6 @@ import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
 import 'package:shimmer/shimmer.dart';
-import 'package:geolocator/geolocator.dart';
 import '../../core/theme.dart';
 import '../../shared/providers/scan_settings_provider.dart';
 import '../../shared/utils/scan_feedback.dart';
@@ -59,15 +58,6 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       );
     }
 
-    // 위치 권한 요청 (카메라 권한 다이얼로그와 겹치지 않도록 약간 지연)
-    Future.delayed(const Duration(milliseconds: 800), _requestLocationPermission);
-  }
-
-  Future<void> _requestLocationPermission() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
-    }
   }
 
   @override

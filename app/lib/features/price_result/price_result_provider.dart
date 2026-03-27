@@ -15,32 +15,21 @@ final priceProvider =
   return PriceApi.getPrice(barcode);
 });
 
-/// 스캔 저장 + 가격 조회를 한 번에 처리하는 Notifier
+/// 스캔 가격 조회 Notifier — 저장은 사용자가 명시적으로 '저장' 버튼을 누를 때
 class PriceResultNotifier
     extends AutoDisposeFamilyAsyncNotifier<Map<String, dynamic>, String> {
-  bool _scanSaved = false;
 
   @override
   Future<Map<String, dynamic>> build(String barcode) async {
-    final data = await PriceApi.getPrice(barcode);
-
-    // 첫 로드 시 스캔 이벤트 저장 후 scan_id를 data에 주입
-    if (!_scanSaved) {
-      _scanSaved = true;
-      final scanId = await _saveScan(barcode, data);
-      if (scanId != null) {
-        return {...data, 'scan_id': scanId};
-      }
-    }
-
-    return data;
+    // 가격 조회만 — 자동 저장 없음
+    return PriceApi.getPrice(barcode);
   }
 
-  Future<String?> _saveScan(
-      String barcode, Map<String, dynamic> priceData) async {
+  /// 저장 버튼 또는 마트 가격 입력 전 호출 — scan 이벤트 DB 저장
+  Future<String?> saveScan(
+      String barcode, List<Map<String, dynamic>> prices) async {
     try {
       final deviceUuid = await ref.read(deviceUuidProvider.future);
-      final prices = (priceData['prices'] as List).cast<Map>();
       final result = await ScanApi.postScan(
         deviceUuid: deviceUuid,
         scanType: 'product',
@@ -53,6 +42,11 @@ class PriceResultNotifier
                 })
             .toList(),
       );
+      // scan_id를 현재 state에 주입해 ManualPriceScreen이 참조 가능하도록
+      final current = state.valueOrNull;
+      if (current != null) {
+        state = AsyncValue.data({...current, 'scan_id': result['scan_id']});
+      }
       ref.invalidate(scanHistoryProvider);
       ref.invalidate(priceHistoryProvider(barcode));
       return result['scan_id'] as String?;

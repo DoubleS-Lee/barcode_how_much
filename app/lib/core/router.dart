@@ -22,9 +22,14 @@ final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
       ),
       GoRoute(
         path: '/manual-price/:barcode',
-        builder: (_, state) => ManualPriceScreen(
-          barcode: state.pathParameters['barcode']!,
-        ),
+        builder: (_, state) {
+          final extra = state.extra as Map<String, String?>?;
+          return ManualPriceScreen(
+            barcode: state.pathParameters['barcode']!,
+            initialStore: extra?['store'],
+            initialMemo: extra?['memo'],
+          );
+        },
       ),
       GoRoute(path: '/history', builder: (_, __) => const ScanHistoryScreen()),
       GoRoute(path: '/community', builder: (_, __) => const CommunityScreen()),

@@ -11,7 +11,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '개인정보처리방침',
-      lastUpdated: '2026년 3월 23일',
+      lastUpdated: '2026년 3월 27일',
       sections: const [
         _Section(
           title: '1. 개인정보 수집 항목 및 수집 방법',
@@ -22,20 +22,19 @@ class PrivacyPolicyScreen extends StatelessWidget {
               '• 바코드 스캔 이력(바코드 번호, 스캔 일시): 가격 비교 서비스 제공\n'
               '• 온라인 가격 조회 결과: 스캔 시 자동 수집\n\n'
               '【선택 수집 항목】\n'
-              '• GPS 위치 정보(위도·경도): 스캔 또는 게시글 작성 시 이용자 동의 후 수집\n'
-              '• 오프라인 가격 입력값, 매장명, 메모: 이용자가 직접 입력\n'
+              '• 오프라인 가격 입력값, 장소명, 메모: 이용자가 직접 입력\n'
               '• 게시글 내용(제목, 본문, 가격, 첨부 이미지): 이용자가 직접 작성\n'
               '• 찜 목록(관심 바코드): 이용자가 직접 등록\n'
               '• FCM 푸시 알림 토큰: 알림 수신 동의 시 수집\n'
               '• 소셜 로그인 정보(이름, 이메일): 구글·카카오·네이버 로그인 선택 시 수집\n\n'
-              '수집 방법: 앱 내 이용자 직접 입력, 서비스 이용 과정에서 자동 수집',
+              '수집 방법: 앱 내 이용자 직접 입력, 서비스 이용 과정에서 자동 수집\n\n'
+              '※ 서비스는 GPS 등 기기 위치 정보를 수집하지 않습니다.',
         ),
         _Section(
           title: '2. 개인정보 수집·이용 목적',
           body: '• 바코드 스캔 기반 가격 비교 서비스 제공\n'
               '• 개인별 스캔 이력 및 가격 변동 추적 서비스 제공\n'
-              '• 스캔·게시글에 위치 정보 기록 (이용자 선택 시)\n'
-              '• 찜한 상품의 가격 하락 푸시 알림 발송\n'
+              '• 오프라인 가격 및 장소 기록 (이용자 직접 입력 시)\n'
               '• 공유 게시판 서비스 운영\n'
               '• 소셜 로그인을 통한 기기 교체 시 데이터 연속성 제공\n'
               '• 서비스 개선 및 오류 분석\n'
@@ -83,7 +82,6 @@ class PrivacyPolicyScreen extends StatelessWidget {
               '• 개인정보 조회: 앱 내 스캔 기록 화면에서 직접 확인\n'
               '• 개인정보 삭제: 설정 > 스캔 기록 전체 삭제 기능 이용\n'
               '• 게시글 삭제: 게시판 내 본인 게시글 직접 삭제\n'
-              '• 위치 정보 수집 거부: 기기 설정에서 위치 권한 비허용\n'
               '• 푸시 알림 수신 거부: 기기 설정에서 알림 비허용\n\n'
               '위 방법으로 해결되지 않는 경우 아래 연락처로 문의해주세요.',
         ),
@@ -111,7 +109,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
           title: '10. 개인정보처리방침 변경',
           body: '본 방침은 법령·정책 변경이나 서비스 변경에 따라 수정될 수 있습니다.\n'
               '변경 시 앱 내 공지 또는 업데이트를 통해 사전 고지합니다.\n\n'
-              '시행일: 2026년 3월 23일',
+              '시행일: 2026년 3월 27일',
         ),
       ],
     );
@@ -127,7 +125,7 @@ class TermsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '이용약관',
-      lastUpdated: '2026년 3월 23일',
+      lastUpdated: '2026년 3월 27일',
       sections: const [
         _Section(
           title: '제1조 (목적)',
@@ -138,8 +136,8 @@ class TermsScreen extends StatelessWidget {
           body: '서비스는 다음의 기능을 제공합니다.\n\n'
               '• 바코드 스캔을 통한 온라인 쇼핑몰 가격 비교\n'
               '• 개인 스캔 이력 및 가격 변동 추적\n'
-              '• 오프라인 마트 가격 직접 입력 및 온·오프라인 가격 비교\n'
-              '• 가격 하락 알림(찜 기능)\n'
+              '• 오프라인 가격 직접 입력 및 온·오프라인 가격 비교\n'
+              '• 찜 기능(관심 상품 저장)\n'
               '• 커뮤니티 가격 공유 게시판',
         ),
         _Section(
@@ -202,7 +200,7 @@ class TermsScreen extends StatelessWidget {
           title: '제10조 (문의)',
           body: '본 약관에 관한 문의는 아래 연락처로 해주세요.\n\n'
               '• 이메일: eolmaeossjeo@gmail.com\n\n'
-              '시행일: 2026년 3월 23일',
+              '시행일: 2026년 3월 27일',
         ),
       ],
     );
@@ -218,7 +216,7 @@ class MarketingInfoScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '마케팅 정보 수신',
-      lastUpdated: '2026년 3월 23일',
+      lastUpdated: '2026년 3월 27일',
       sections: const [
         _Section(
           title: '수신 동의 목적',
@@ -231,14 +229,14 @@ class MarketingInfoScreen extends StatelessWidget {
         _Section(
           title: '수신 채널',
           body: '• 앱 푸시 알림\n\n'
-              '마케팅 알림은 서비스 필수 알림(가격 하락 알림 등)과 별개로 운영됩니다.',
+              '마케팅 알림은 서비스 필수 알림과 별개로 운영됩니다.',
         ),
         _Section(
           title: '수신 거부 방법',
           body: '마케팅 정보 수신 동의는 선택 사항이며, 동의하지 않아도 서비스를 정상적으로 이용할 수 있습니다.\n\n'
               '수신 거부 방법:\n'
               '• 기기 설정 > 알림 > 얼마였지? > 마케팅 알림 끄기\n\n'
-              '수신 거부 시에도 서비스 관련 필수 알림(가격 하락 알림 등)은 계속 수신됩니다.',
+              '수신 거부 시에도 서비스 관련 필수 알림은 계속 수신됩니다.',
         ),
         _Section(
           title: '개인정보 처리',
