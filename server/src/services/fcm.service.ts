@@ -1,6 +1,7 @@
 import admin from 'firebase-admin';
 import path from 'path';
 import { readFileSync } from 'fs';
+import { logger } from '../utils/logger';
 
 let initialized = false;
 
@@ -18,10 +19,10 @@ function ensureInitialized(): boolean {
     const serviceAccount = JSON.parse(raw);
     admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
     initialized = true;
-    console.log('[FCM] Firebase Admin SDK initialized');
+    logger.info('FCM', 'Firebase Admin SDK initialized');
     return true;
   } catch (e) {
-    console.error('[FCM] Failed to initialize:', e);
+    logger.error('FCM', 'Failed to initialize', e);
     return false;
   }
 }
@@ -58,9 +59,9 @@ export async function sendFavoriteDropNotification(params: {
         payload: { aps: { sound: 'default', badge: 1 } },
       },
     });
-    console.log(`[FCM] Sent favorite drop: ${params.productName}`);
+    logger.info('FCM', `Sent favorite drop: ${params.productName}`);
   } catch (e: any) {
-    console.error('[FCM] Send error:', e?.errorInfo?.code ?? e);
+    logger.error('FCM', 'Send error', e?.errorInfo?.code ?? e);
   }
 }
 
@@ -102,13 +103,13 @@ export async function sendPriceDropNotification(params: {
         },
       },
     });
-    console.log(`[FCM] Sent price drop: ${params.productName}`);
+    logger.info('FCM', `Sent price drop: ${params.productName}`);
   } catch (e: any) {
     // 토큰 만료 시 DB에서 제거
     if (e?.errorInfo?.code === 'messaging/registration-token-not-registered') {
-      console.log('[FCM] Token expired, removing...');
+      logger.info('FCM', 'Token expired, removing...');
       // token으로 device 찾아서 fcmToken null 처리는 caller에서
     }
-    console.error('[FCM] Send error:', e?.errorInfo?.code ?? e);
+    logger.error('FCM', 'Send error', e?.errorInfo?.code ?? e);
   }
 }

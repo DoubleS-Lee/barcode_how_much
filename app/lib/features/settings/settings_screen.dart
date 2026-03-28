@@ -22,6 +22,8 @@ import '../../shared/widgets/app_bottom_nav.dart';
 import '../../shared/providers/saved_locations_provider.dart';
 import '../../shared/providers/nickname_provider.dart';
 
+const _kSupportEmail = _kSupportEmail;
+
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -122,11 +124,11 @@ class SettingsScreen extends ConsumerWidget {
               icon: Icons.mail_outline,
               iconColor: kOnSurfaceVariant,
               title: '문의하기',
-              subtitle: 'lss8825@gmail.com',
+              subtitle: _kSupportEmail,
               onTap: () async {
                 final uri = Uri(
                   scheme: 'mailto',
-                  path: 'lss8825@gmail.com',
+                  path: _kSupportEmail,
                   query: 'subject=얼마였지? 문의',
                 );
                 if (await canLaunchUrl(uri)) {

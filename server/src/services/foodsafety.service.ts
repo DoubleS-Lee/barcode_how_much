@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 dotenv.config();
 
 export interface FoodSafetyResult {
@@ -47,30 +48,30 @@ async function searchC005(barcode: string, apiKey: string): Promise<FoodSafetyRe
 export async function searchFoodSafety(barcode: string): Promise<FoodSafetyResult | null> {
   const apiKey = process.env.FOODSAFETY_API_KEY;
   if (!apiKey || apiKey === 'your_key_here') {
-    console.log('[FoodSafety] API key not set, skipping');
+    logger.debug('FoodSafety', 'API key not set, skipping');
     return null;
   }
 
   try {
     const result = await searchI2570(barcode, apiKey);
     if (result) {
-      console.log(`[FoodSafety] I2570 found: "${result.productName}" (${result.companyName})`);
+      logger.debug('FoodSafety', `I2570 found: "${result.productName}" (${result.companyName})`);
       return result;
     }
   } catch (e) {
-    console.warn('[FoodSafety] I2570 error:', (e as Error)?.message);
+    logger.warn('FoodSafety', 'I2570 error', (e as Error)?.message);
   }
 
   try {
     const result = await searchC005(barcode, apiKey);
     if (result) {
-      console.log(`[FoodSafety] C005 found: "${result.productName}" (${result.companyName})`);
+      logger.debug('FoodSafety', `C005 found: "${result.productName}" (${result.companyName})`);
       return result;
     }
   } catch (e) {
-    console.warn('[FoodSafety] C005 error:', (e as Error)?.message);
+    logger.warn('FoodSafety', 'C005 error', (e as Error)?.message);
   }
 
-  console.log(`[FoodSafety] Not found for barcode: ${barcode}`);
+  logger.debug('FoodSafety', `Not found for barcode: ${barcode}`);
   return null;
 }

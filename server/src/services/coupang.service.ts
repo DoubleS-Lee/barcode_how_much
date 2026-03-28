@@ -1,6 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 dotenv.config();
 
 const BASE_URL = 'https://api-gateway.coupang.com';
@@ -25,7 +26,7 @@ export async function searchCoupang(barcode: string): Promise<CoupangResult | nu
 
   // API 키 미설정 시 null 반환
   if (!accessKey || accessKey === 'your_access_key_here') {
-    console.log('[Coupang] API key not set, skipping');
+    logger.debug('Coupang', 'API key not set, skipping');
     return null;
   }
 

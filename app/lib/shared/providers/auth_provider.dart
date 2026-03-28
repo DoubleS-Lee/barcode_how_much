@@ -1,5 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+const _storage = FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+);
+
+const _kLoginType  = 'social_login_type';
+const _kLoginName  = 'social_login_name';
+const _kLoginEmail = 'social_login_email';
 
 class AuthState {
   final String? loginType;  // 'google' | 'kakao' | 'naver' | null
@@ -14,27 +22,24 @@ class AuthState {
 class AuthNotifier extends AsyncNotifier<AuthState> {
   @override
   Future<AuthState> build() async {
-    final prefs = await SharedPreferences.getInstance();
     return AuthState(
-      loginType: prefs.getString('social_login_type'),
-      loginName: prefs.getString('social_login_name'),
-      loginEmail: prefs.getString('social_login_email'),
+      loginType:  await _storage.read(key: _kLoginType),
+      loginName:  await _storage.read(key: _kLoginName),
+      loginEmail: await _storage.read(key: _kLoginEmail),
     );
   }
 
   Future<void> setLogin(String type, String name, String email) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('social_login_type', type);
-    await prefs.setString('social_login_name', name);
-    await prefs.setString('social_login_email', email);
+    await _storage.write(key: _kLoginType,  value: type);
+    await _storage.write(key: _kLoginName,  value: name);
+    await _storage.write(key: _kLoginEmail, value: email);
     state = AsyncValue.data(AuthState(loginType: type, loginName: name, loginEmail: email));
   }
 
   Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('social_login_type');
-    await prefs.remove('social_login_name');
-    await prefs.remove('social_login_email');
+    await _storage.delete(key: _kLoginType);
+    await _storage.delete(key: _kLoginName);
+    await _storage.delete(key: _kLoginEmail);
     state = const AsyncValue.data(AuthState());
   }
 }

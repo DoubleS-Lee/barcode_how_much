@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import prisma from '../db/prisma';
 import { priceOrchestrator } from './price-orchestrator.service';
 import { sendFavoriteDropNotification } from './fcm.service';
+import { logger } from '../utils/logger';
 
 /**
  * 6시간마다 실행: FCM 토큰 있는 기기의 찜한 상품 가격 확인
@@ -10,24 +11,24 @@ import { sendFavoriteDropNotification } from './fcm.service';
 export function startPriceAlertCron(): void {
   // 6시간마다 (00:00, 06:00, 12:00, 18:00 KST)
   cron.schedule('0 */6 * * *', runPriceCheck, { timezone: 'Asia/Seoul' });
-  console.log('[PriceAlert] Cron started (every 6 hours, favorites-based)');
+  logger.info('PriceAlert', 'Cron started (every 6 hours, favorites-based)');
 }
 
 async function runPriceCheck(): Promise<void> {
-  console.log('[PriceAlert] Starting favorites price check...');
+  logger.info('PriceAlert', 'Starting favorites price check...');
 
   const devices = await prisma.device.findMany({
     where: { fcmToken: { not: null } },
     select: { id: true, deviceUuid: true, fcmToken: true },
   });
 
-  console.log(`[PriceAlert] Checking ${devices.length} devices`);
+  logger.info('PriceAlert', `Checking ${devices.length} devices`);
 
   for (const device of devices) {
     try {
       await checkDeviceFavorites(device as { id: bigint; deviceUuid: string; fcmToken: string });
     } catch (e) {
-      console.error(`[PriceAlert] Error for device ${device.deviceUuid}:`, e);
+      logger.error('PriceAlert', `Error for device ${device.deviceUuid}`, e);
     }
   }
 }
@@ -44,7 +45,7 @@ async function checkDeviceFavorites(device: {
   });
 
   if (favorites.length === 0) return;
-  console.log(`[PriceAlert] ${device.deviceUuid.slice(0, 8)} has ${favorites.length} favorites`);
+  logger.debug('PriceAlert', `${device.deviceUuid.slice(0, 8)} has ${favorites.length} favorites`);
 
   for (const { barcode } of favorites) {
     try {
@@ -95,7 +96,7 @@ async function checkDeviceFavorites(device: {
         await new Promise((r) => setTimeout(r, 1000));
       }
     } catch (e) {
-      console.error(`[PriceAlert] Error checking barcode ${barcode}:`, e);
+      logger.error('PriceAlert', `Error checking barcode ${barcode}`, e);
     }
   }
 }

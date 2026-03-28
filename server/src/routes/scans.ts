@@ -179,7 +179,13 @@ router.patch('/:scanId/offline-price', async (req: Request, res: Response) => {
 
 // GET /api/v1/scans/history?device_uuid=...&limit=50&offset=0
 router.get('/history', async (req: Request, res: Response) => {
-  const { device_uuid, limit = '50', offset = '0' } = req.query as Record<string, string>;
+  const querySchema = z.object({ device_uuid: z.string().uuid() });
+  const queryResult = querySchema.safeParse(req.query);
+  if (!queryResult.success) return res.json({ total: 0, items: [] });
+
+  const { device_uuid } = queryResult.data;
+  const parsedLimit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+  const parsedOffset = Math.max(0, parseInt(req.query.offset as string) || 0);
 
   const device = await prisma.device.findUnique({ where: { deviceUuid: device_uuid } });
   if (!device) return res.json({ total: 0, items: [] });
@@ -189,8 +195,8 @@ router.get('/history', async (req: Request, res: Response) => {
     prisma.scan.findMany({
       where: { deviceId: device.id },
       orderBy: { scannedAt: 'desc' },
-      take: parseInt(limit),
-      skip: parseInt(offset),
+      take: parsedLimit,
+      skip: parsedOffset,
       include: { onlinePrices: true, offlinePrices: true, barcodeContent: true },
     }),
   ]);
@@ -295,6 +301,9 @@ router.delete('/history', async (req: Request, res: Response) => {
 // DELETE /api/v1/scans/:scanId — 단일 스캔 삭제 (history 라우트보다 뒤에 위치해야 함)
 router.delete('/:scanId', async (req: Request, res: Response) => {
   const scanId = BigInt(req.params.scanId as string);
+
+  const scan = await prisma.scan.findUnique({ where: { id: scanId } });
+  if (!scan) return res.status(404).json({ error: 'NOT_FOUND' });
 
   await prisma.onlinePrice.deleteMany({ where: { scanId } });
   await prisma.offlinePrice.deleteMany({ where: { scanId } });

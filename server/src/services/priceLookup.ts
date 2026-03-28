@@ -1,4 +1,5 @@
 import prisma from '../db/prisma';
+import { logger } from '../utils/logger';
 
 interface PriceResult {
   platform: string;
@@ -54,6 +55,6 @@ export async function triggerPriceLookup(postId: bigint, barcode: string): Promi
       skipDuplicates: false,
     });
   } catch (e) {
-    console.error('[priceLookup] error:', e);
+    logger.error('PriceLookup', 'Failed to fetch and store prices', e);
   }
 }

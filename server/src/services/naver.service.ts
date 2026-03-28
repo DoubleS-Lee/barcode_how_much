@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 dotenv.config();
 
 export interface NaverResult {
@@ -95,29 +96,29 @@ export async function searchNaver(barcode: string, productName?: string): Promis
 
   // API 키 미설정 시 null 반환
   if (!clientId || clientId === 'your_client_id_here') {
-    console.log('[Naver] API key not set, skipping');
+    logger.debug('Naver', 'API key not set, skipping');
     return null;
   }
 
   const timeout = parseInt(process.env.API_TIMEOUT_MS || '3000');
 
   // Step 1: 항상 바코드로 먼저 검색 (네이버 카탈로그에 있으면 한국어 이름 + 이미지 확보)
-  console.log(`[Naver] Step 1 — barcode search: "${barcode}"`);
+  logger.debug('Naver', `Step 1 — barcode search: "${barcode}"`);
   const step1 = await naverApiSearch(barcode, clientId, clientSecret, timeout);
 
   if (step1) {
     // 바코드로 찾았으면 한국어 이름으로 재검색해서 정확도 향상
-    console.log(`[Naver] Step 2 — name search: "${step1.productName}"`);
+    logger.debug('Naver', `Step 2 — name search: "${step1.productName}"`);
     const step2 = await naverApiSearch(step1.productName, clientId, clientSecret, timeout);
     return step2 || step1;
   }
 
   // Step 1 실패 → OFF/쿠팡에서 온 상품명으로 fallback 검색
   if (productName && productName.trim().length > 1) {
-    console.log(`[Naver] Barcode not found, fallback name search: "${productName}"`);
+    logger.debug('Naver', `Barcode not found, fallback name search: "${productName}"`);
     return naverApiSearch(productName, clientId, clientSecret, timeout);
   }
 
-  console.log(`[Naver] No result for barcode: "${barcode}"`);
+  logger.debug('Naver', `No result for barcode: "${barcode}"`);
   return null;
 }

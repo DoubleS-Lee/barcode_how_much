@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 dotenv.config();
 
 export interface RecommendItem {
@@ -136,7 +137,7 @@ export async function getRecommendations(
 
   // API 키 미설정 → mock 반환
   if (!clientId || clientId === 'your_client_id_here') {
-    console.log('[Recommend] Using mock data (API key not set)');
+    logger.debug('Recommend', 'Using mock data (API key not set)');
     return {
       recommendations: [
         { product_name: '비슷한 상품 A (Mock)', price: 8900, image_url: null, shopping_url: '#', trend_score: 82 },
@@ -167,7 +168,7 @@ export async function getRecommendations(
         source = 'datalab';
       }
     } catch (e) {
-      console.warn('[Recommend] DataLab failed, falling back to basic search:', (e as Error).message);
+      logger.warn('Recommend', 'DataLab failed, falling back to basic search', (e as Error).message);
     }
   }
 

@@ -14,25 +14,24 @@ function toAuthorId(deviceUuid: string): string {
   return crypto.createHash('sha256').update(deviceUuid).digest('hex').substring(0, 20);
 }
 
-// device_uuid 배열 → { deviceUuid: nickname } 맵 (SocialAccount 기반)
+// device_uuid 배열 → { deviceUuid: nickname } 맵 (devices ⟵ social_accounts LEFT JOIN, 1-query)
 async function buildNicknameMap(deviceUuids: string[]): Promise<Map<string, string | null>> {
   if (deviceUuids.length === 0) return new Map();
-  const devices = await prisma.device.findMany({
-    where: { deviceUuid: { in: deviceUuids } },
-    select: { deviceUuid: true, socialProvider: true, socialId: true },
-  });
-  const socialKeys = devices.filter((d) => d.socialProvider && d.socialId);
-  const socialAccounts = socialKeys.length > 0
-    ? await prisma.socialAccount.findMany({
-        where: { OR: socialKeys.map((d) => ({ provider: d.socialProvider!, socialId: d.socialId! })) },
-        select: { provider: true, socialId: true, nickname: true },
-      })
-    : [];
-  const saMap = new Map(socialAccounts.map((sa) => [`${sa.provider}:${sa.socialId}`, sa.nickname ?? null]));
-  return new Map(devices.map((d) => [
-    d.deviceUuid,
-    d.socialProvider && d.socialId ? (saMap.get(`${d.socialProvider}:${d.socialId}`) ?? null) : null,
-  ]));
+  const rows = await prisma.$queryRaw<Array<{ device_uuid: string; nickname: string | null }>>(
+    Prisma.sql`
+      SELECT d.device_uuid, sa.nickname
+      FROM devices d
+      LEFT JOIN social_accounts sa
+        ON sa.provider = d.social_provider
+       AND sa.social_id = d.social_id
+      WHERE d.device_uuid IN (${Prisma.join(deviceUuids)})
+    `
+  );
+  const map = new Map(rows.map((r) => [r.device_uuid, r.nickname ?? null]));
+  for (const uuid of deviceUuids) {
+    if (!map.has(uuid)) map.set(uuid, null);
+  }
+  return map;
 }
 
 // 업로드 디렉토리 생성
@@ -309,8 +308,9 @@ router.put('/:id', async (req: Request, res: Response) => {
 // DELETE /api/v1/posts/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   const id = BigInt(req.params.id as string);
-  const { device_uuid } = req.body;
-  if (!device_uuid) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const body = z.object({ device_uuid: z.string().uuid() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const { device_uuid } = body.data;
 
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post) return res.status(404).json({ error: 'NOT_FOUND' });
@@ -323,8 +323,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // POST /api/v1/posts/:id/like
 router.post('/:id/like', async (req: Request, res: Response) => {
   const id = BigInt(req.params.id as string);
-  const { device_uuid } = req.body;
-  if (!device_uuid) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const body = z.object({ device_uuid: z.string().uuid() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const { device_uuid } = body.data;
 
   const existing = await prisma.postLike.findUnique({
     where: { postId_deviceUuid: { postId: id, deviceUuid: device_uuid } },
@@ -332,21 +333,27 @@ router.post('/:id/like', async (req: Request, res: Response) => {
 
   if (existing) {
     await prisma.postLike.delete({ where: { id: existing.id } });
+    await prisma.post.update({ where: { id }, data: { likeCount: { decrement: 1 } } });
   } else {
-    await prisma.postLike.create({ data: { postId: id, deviceUuid: device_uuid } });
+    try {
+      await prisma.postLike.create({ data: { postId: id, deviceUuid: device_uuid } });
+      await prisma.post.update({ where: { id }, data: { likeCount: { increment: 1 } } });
+    } catch (e) {
+      // P2002: 동시 요청으로 이미 좋아요가 생성된 경우 — 정상 처리
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
+    }
   }
 
-  const likeCount = await prisma.postLike.count({ where: { postId: id } });
-  await prisma.post.update({ where: { id }, data: { likeCount } }).catch(() => {});
-
-  res.json({ liked: !existing, like_count: likeCount });
+  const updated = await prisma.post.findUnique({ where: { id }, select: { likeCount: true } });
+  res.json({ liked: !existing, like_count: updated?.likeCount ?? 0 });
 });
 
 // POST /api/v1/posts/:id/report
 router.post('/:id/report', async (req: Request, res: Response) => {
   const id = BigInt(req.params.id as string);
-  const { device_uuid } = req.body;
-  if (!device_uuid) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const body = z.object({ device_uuid: z.string().uuid() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const { device_uuid } = body.data;
 
   const existing = await prisma.postReport.findUnique({
     where: { postId_deviceUuid: { postId: id, deviceUuid: device_uuid } },
@@ -358,10 +365,9 @@ router.post('/:id/report', async (req: Request, res: Response) => {
   }
 
   await prisma.postReport.create({ data: { postId: id, deviceUuid: device_uuid } });
-  const reportCount = await prisma.postReport.count({ where: { postId: id } });
-  await prisma.post.update({ where: { id }, data: { reportCount } }).catch(() => {});
-
-  res.json({ reported: true, report_count: reportCount });
+  await prisma.post.update({ where: { id }, data: { reportCount: { increment: 1 } } });
+  const updated = await prisma.post.findUnique({ where: { id }, select: { reportCount: true } });
+  res.json({ reported: true, report_count: updated?.reportCount ?? 0 });
 });
 
 // GET /api/v1/posts/:id/comments
@@ -390,9 +396,9 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
 // POST /api/v1/posts/:id/comments
 router.post('/:id/comments', async (req: Request, res: Response) => {
   const id = BigInt(req.params.id as string);
-  const { device_uuid, content } = req.body;
-  if (!device_uuid || !content?.trim()) return res.status(400).json({ error: 'INVALID_REQUEST' });
-  if (content.length > 500) return res.status(400).json({ error: 'CONTENT_TOO_LONG' });
+  const body = z.object({ device_uuid: z.string().uuid(), content: z.string().min(1).max(500) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const { device_uuid, content } = body.data;
 
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post) return res.status(404).json({ error: 'NOT_FOUND' });
@@ -401,15 +407,12 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
     data: { postId: id, deviceUuid: device_uuid, content: content.trim() },
   });
 
-  const commentDevice = await prisma.device.findUnique({
-    where: { deviceUuid: device_uuid },
-    select: { nickname: true },
-  });
+  const nickMap = await buildNicknameMap([device_uuid]);
 
   res.status(201).json({
     id: comment.id.toString(),
     author_id: toAuthorId(comment.deviceUuid),
-    nickname: commentDevice?.nickname ?? null,
+    nickname: nickMap.get(device_uuid) ?? null,
     content: comment.content,
     is_owner: true,
     created_at: comment.createdAt,
@@ -419,8 +422,9 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
 // DELETE /api/v1/posts/:id/comments/:commentId
 router.delete('/:id/comments/:commentId', async (req: Request, res: Response) => {
   const commentId = BigInt(req.params.commentId as string);
-  const { device_uuid } = req.body;
-  if (!device_uuid) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const body = z.object({ device_uuid: z.string().uuid() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'INVALID_REQUEST' });
+  const { device_uuid } = body.data;
 
   const comment = await prisma.postComment.findUnique({ where: { id: commentId } });
   if (!comment) return res.status(404).json({ error: 'NOT_FOUND' });
