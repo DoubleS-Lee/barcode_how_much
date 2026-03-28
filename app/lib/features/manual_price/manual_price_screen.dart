@@ -276,7 +276,7 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
                 // 매장 / 메모 입력 (선택)
                 const SizedBox(height: 12),
                 Consumer(builder: (context, ref, _) {
-                  final locs = ref.watch(savedLocationsProvider);
+                  final locs = ref.watch(savedLocationsProvider).valueOrNull ?? [];
                   if (locs.isEmpty) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),

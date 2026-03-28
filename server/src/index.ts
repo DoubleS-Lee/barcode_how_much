@@ -11,6 +11,7 @@ import recommendRouter from './routes/recommend';
 import postsRouter from './routes/posts';
 import devicesRouter from './routes/devices';
 import favoritesRouter from './routes/favorites';
+import savedLocationsRouter from './routes/saved-locations';
 import { errorHandler } from './middleware/error';
 import { logger } from './utils/logger';
 dotenv.config();
@@ -58,6 +59,7 @@ app.use('/api/v1/recommend', recommendRouter);
 app.use('/api/v1/posts', postsRouter);
 app.use('/api/v1/devices', devicesRouter);
 app.use('/api/v1/favorites', favoritesRouter);
+app.use('/api/v1/saved-locations', savedLocationsRouter);
 
 app.use(errorHandler);
 

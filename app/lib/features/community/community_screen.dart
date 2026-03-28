@@ -15,8 +15,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
 import '../../shared/providers/auth_provider.dart';
+import '../../shared/providers/device_provider.dart';
 import '../../shared/providers/saved_locations_provider.dart';
-import '../../shared/utils/device_id.dart';
 import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 
@@ -39,21 +39,26 @@ class _PostsData {
 }
 
 class _PostsNotifier extends StateNotifier<AsyncValue<_PostsData>> {
-  _PostsNotifier({required String search, required String sort})
-      : _search = search,
+  _PostsNotifier({
+    required String search,
+    required String sort,
+    required Future<String> Function() getDeviceUuid,
+  })  : _search = search,
         _sort = sort,
+        _getDeviceUuid = getDeviceUuid,
         super(const AsyncValue.loading()) {
     _loadPage(1);
   }
 
   final String _search;
   final String _sort;
+  final Future<String> Function() _getDeviceUuid;
   int _currentPage = 0;
   bool _isLoadingMore = false;
 
   Future<void> _loadPage(int page) async {
     try {
-      final deviceUuid = await DeviceId.get();
+      final deviceUuid = await _getDeviceUuid();
       final result = await PostsApi.fetchPosts(
         page: page,
         search: _search.isEmpty ? null : _search,
@@ -98,7 +103,11 @@ class _PostsNotifier extends StateNotifier<AsyncValue<_PostsData>> {
 
 final _postsProvider = StateNotifierProvider.autoDispose
     .family<_PostsNotifier, AsyncValue<_PostsData>, (String, String)>(
-  (ref, key) => _PostsNotifier(search: key.$1, sort: key.$2),
+  (ref, key) => _PostsNotifier(
+    search: key.$1,
+    sort: key.$2,
+    getDeviceUuid: () => ref.read(deviceUuidProvider.future),
+  ),
 );
 
 // ── 메인 화면 ─────────────────────────────────────────────
@@ -379,7 +388,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
   }
 
   Future<void> _toggleLike() async {
-    final uuid = await DeviceId.get();
+    final uuid = await ref.read(deviceUuidProvider.future);
     // Optimistic update
     setState(() {
       _post = _post.copyWith(
@@ -427,7 +436,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
     );
     if (confirm != true || !mounted) return;
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final result = await PostsApi.reportPost(id: _post.id, deviceUuid: uuid);
       if (mounted) {
         setState(() {
@@ -664,7 +673,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              final uuid = await DeviceId.get();
+              final uuid = await ref.read(deviceUuidProvider.future);
               await PostsApi.deletePost(id: _post.id, deviceUuid: uuid);
               widget.onRefresh();
             },
@@ -680,16 +689,16 @@ class _PostCardState extends ConsumerState<_PostCard> {
 
 // ── 게시글 상세 바텀시트 ──────────────────────────────────
 
-class _PostDetailSheet extends StatefulWidget {
+class _PostDetailSheet extends ConsumerStatefulWidget {
   final PostModel post;
   final void Function(PostModel updated)? onLikeChanged;
   const _PostDetailSheet({required this.post, this.onLikeChanged});
 
   @override
-  State<_PostDetailSheet> createState() => _PostDetailSheetState();
+  ConsumerState<_PostDetailSheet> createState() => _PostDetailSheetState();
 }
 
-class _PostDetailSheetState extends State<_PostDetailSheet> {
+class _PostDetailSheetState extends ConsumerState<_PostDetailSheet> {
   late PostModel _post;
   List<PostCommentModel>? _comments;
   bool _commentsLoading = false;
@@ -706,7 +715,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
 
   Future<void> _recordView() async {
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final updated = await PostsApi.fetchPost(id: _post.id, deviceUuid: uuid);
       if (mounted) setState(() => _post = updated);
     } catch (_) {}
@@ -721,7 +730,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
   Future<void> _loadComments() async {
     setState(() => _commentsLoading = true);
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final comments = await PostsApi.fetchComments(id: _post.id, deviceUuid: uuid);
       if (mounted) setState(() => _comments = comments);
     } catch (_) {
@@ -732,7 +741,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
   }
 
   Future<void> _toggleLike() async {
-    final uuid = await DeviceId.get();
+    final uuid = await ref.read(deviceUuidProvider.future);
     final wasLiked = _post.liked;
     setState(() {
       _post = _post.copyWith(
@@ -785,7 +794,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
     );
     if (confirm != true || !mounted) return;
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final result = await PostsApi.reportPost(id: _post.id, deviceUuid: uuid);
       if (mounted) {
         final updated = _post.copyWith(reported: true, reportCount: result['report_count'] as int);
@@ -940,7 +949,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
     if (text.isEmpty) return;
     setState(() => _commentSubmitting = true);
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final comment =
           await PostsApi.addComment(id: _post.id, deviceUuid: uuid, content: text);
       _commentCtrl.clear();
@@ -957,7 +966,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
 
   Future<void> _deleteComment(PostCommentModel comment) async {
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       await PostsApi.deleteComment(
           postId: _post.id, commentId: comment.id, deviceUuid: uuid);
       if (mounted) {
@@ -1448,7 +1457,7 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
     final bool shareLocation = locationHint != null;
 
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       const String? barcode = null;
 
       // 새 이미지가 있으면 업로드
@@ -1556,7 +1565,7 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
 
               // ── 장소 ──
               Builder(builder: (context) {
-                final savedLocs = ref.watch(savedLocationsProvider);
+                final savedLocs = ref.watch(savedLocationsProvider).valueOrNull ?? [];
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

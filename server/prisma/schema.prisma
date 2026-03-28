@@ -176,6 +176,17 @@ model DeviceFavorite {
   @@map("device_favorites")
 }
 
+// 즐겨찾기 장소 (계정 기반 device_uuid로 서버 저장)
+model SavedLocation {
+  id         BigInt   @id @default(autoincrement())
+  deviceUuid String   @map("device_uuid") @db.VarChar(36)
+  name       String   @db.VarChar(200)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([deviceUuid, name])
+  @@map("saved_locations")
+}
+
 // 비상품 바코드 원문 내용 (QR URL, WiFi, 연락처, 텍스트 등)
 model BarcodeContent {
   id          BigInt   @id @default(autoincrement())

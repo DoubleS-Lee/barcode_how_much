@@ -9,7 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
-import '../../shared/utils/device_id.dart';
+import '../../shared/providers/device_provider.dart';
 import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 import '../price_result/recommend_provider.dart';
@@ -426,7 +426,7 @@ Future<void> _repricingByName(
   );
 }
 
-class _NaverCandidateSheet extends StatefulWidget {
+class _NaverCandidateSheet extends ConsumerStatefulWidget {
   final String barcode;
   final String productName;
   final VoidCallback onSelected;
@@ -438,10 +438,10 @@ class _NaverCandidateSheet extends StatefulWidget {
   });
 
   @override
-  State<_NaverCandidateSheet> createState() => _NaverCandidateSheetState();
+  ConsumerState<_NaverCandidateSheet> createState() => _NaverCandidateSheetState();
 }
 
-class _NaverCandidateSheetState extends State<_NaverCandidateSheet> {
+class _NaverCandidateSheetState extends ConsumerState<_NaverCandidateSheet> {
   List<Map<String, dynamic>>? _candidates;
   bool _loading = true;
   String? _error;
@@ -462,7 +462,7 @@ class _NaverCandidateSheetState extends State<_NaverCandidateSheet> {
   }
 
   Future<void> _select(Map<String, dynamic> candidate) async {
-    final deviceUuid = await DeviceId.get();
+    final deviceUuid = await ref.read(deviceUuidProvider.future);
     if (!mounted) return;
     Navigator.pop(context);
     try {
@@ -1208,7 +1208,7 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
     final storeCtrl = TextEditingController(text: _storeHint ?? '');
     final memoCtrl = TextEditingController(text: _memo ?? '');
 
-    final savedLocations = ref.read(savedLocationsProvider);
+    final savedLocations = ref.read(savedLocationsProvider).valueOrNull ?? [];
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

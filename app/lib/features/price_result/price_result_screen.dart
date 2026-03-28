@@ -809,7 +809,7 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
 
   Future<void> _showStoreDialog() async {
     final controller = TextEditingController(text: _storeHint ?? '');
-    final savedLocations = ref.read(savedLocationsProvider);
+    final savedLocations = ref.read(savedLocationsProvider).valueOrNull ?? [];
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1006,7 +1006,7 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
         initialStore: _storeHint,
         initialMemo: _memo,
         initialPrice: _pendingOfflinePrice,
-        savedLocations: ref.read(savedLocationsProvider),
+        savedLocations: ref.read(savedLocationsProvider).valueOrNull ?? [],
         onConfirmed: (price, store, memo) {
           setState(() {
             _pendingOfflinePrice = price;

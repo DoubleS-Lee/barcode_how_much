@@ -14,12 +14,19 @@ function toAuthorId(deviceUuid: string): string {
   return crypto.createHash('sha256').update(deviceUuid).digest('hex').substring(0, 20);
 }
 
-// device_uuid 배열 → { deviceUuid: nickname } 맵 (devices ⟵ social_accounts LEFT JOIN, 1-query)
-async function buildNicknameMap(deviceUuids: string[]): Promise<Map<string, string | null>> {
+type AuthorInfo = { nickname: string | null; socialKey: string | null };
+
+// device_uuid 배열 → AuthorInfo 맵 (닉네임 + 소셜키, 1-query JOIN)
+async function buildAuthorInfoMap(deviceUuids: string[]): Promise<Map<string, AuthorInfo>> {
   if (deviceUuids.length === 0) return new Map();
-  const rows = await prisma.$queryRaw<Array<{ device_uuid: string; nickname: string | null }>>(
+  const rows = await prisma.$queryRaw<Array<{
+    device_uuid: string;
+    nickname: string | null;
+    social_provider: string | null;
+    social_id: string | null;
+  }>>(
     Prisma.sql`
-      SELECT d.device_uuid, sa.nickname
+      SELECT d.device_uuid, sa.nickname, d.social_provider, d.social_id
       FROM devices d
       LEFT JOIN social_accounts sa
         ON sa.provider = d.social_provider
@@ -27,11 +34,27 @@ async function buildNicknameMap(deviceUuids: string[]): Promise<Map<string, stri
       WHERE d.device_uuid IN (${Prisma.join(deviceUuids)})
     `
   );
-  const map = new Map(rows.map((r) => [r.device_uuid, r.nickname ?? null]));
+  const map = new Map<string, AuthorInfo>(rows.map((r) => [
+    r.device_uuid,
+    {
+      nickname: r.nickname ?? null,
+      socialKey: r.social_provider && r.social_id ? `${r.social_provider}:${r.social_id}` : null,
+    },
+  ]));
   for (const uuid of deviceUuids) {
-    if (!map.has(uuid)) map.set(uuid, null);
+    if (!map.has(uuid)) map.set(uuid, { nickname: null, socialKey: null });
   }
   return map;
+}
+
+// 기기의 소셜 계정 키 조회 (로그아웃 상태 → null)
+async function getSocialKey(deviceUuid: string): Promise<string | null> {
+  const device = await prisma.device.findUnique({
+    where: { deviceUuid },
+    select: { socialProvider: true, socialId: true },
+  });
+  if (!device?.socialProvider || !device?.socialId) return null;
+  return `${device.socialProvider}:${device.socialId}`;
 }
 
 // 업로드 디렉토리 생성
@@ -154,17 +177,23 @@ router.get('/', async (req: Request, res: Response) => {
     reportedSet = new Set(reports.map((r) => r.postId.toString()));
   }
 
-  // 닉네임 배치 조회 (SocialAccount 기반)
+  // 작성자 정보(닉네임+소셜키) 배치 조회 + 요청자 소셜키 조회
   const allUuids = [...new Set(posts.map((p) => p.deviceUuid))];
-  const nicknameMap = await buildNicknameMap(allUuids);
+  const [authorInfoMap, requesterKey] = await Promise.all([
+    buildAuthorInfoMap(allUuids),
+    device_uuid ? getSocialKey(device_uuid) : Promise.resolve(null),
+  ]);
 
   res.json({
-    posts: posts.map((p) => serializePost(p, {
-      liked: likedSet.has(p.id.toString()),
-      reported: reportedSet.has(p.id.toString()),
-      isOwner: device_uuid ? p.deviceUuid === device_uuid : false,
-      nickname: nicknameMap.get(p.deviceUuid) ?? null,
-    })),
+    posts: posts.map((p) => {
+      const authorInfo = authorInfoMap.get(p.deviceUuid);
+      return serializePost(p, {
+        liked: likedSet.has(p.id.toString()),
+        reported: reportedSet.has(p.id.toString()),
+        isOwner: requesterKey !== null && requesterKey === (authorInfo?.socialKey ?? null),
+        nickname: authorInfo?.nickname ?? null,
+      });
+    }),
     total, page, limit,
   });
 });
@@ -211,13 +240,17 @@ router.get('/:id', async (req: Request, res: Response) => {
     reported = !!report;
   }
 
-  const nickMap = await buildNicknameMap([post.deviceUuid]);
+  const [authorInfoMap, requesterKey] = await Promise.all([
+    buildAuthorInfoMap([post.deviceUuid]),
+    device_uuid ? getSocialKey(device_uuid) : Promise.resolve(null),
+  ]);
+  const authorInfo = authorInfoMap.get(post.deviceUuid);
 
   res.json(serializePost(post, {
     liked,
     reported,
-    isOwner: device_uuid ? post.deviceUuid === device_uuid : false,
-    nickname: nickMap.get(post.deviceUuid) ?? null,
+    isOwner: requesterKey !== null && requesterKey === (authorInfo?.socialKey ?? null),
+    nickname: authorInfo?.nickname ?? null,
   }));
 });
 
@@ -282,7 +315,14 @@ router.put('/:id', async (req: Request, res: Response) => {
 
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post) return res.status(404).json({ error: 'NOT_FOUND' });
-  if (post.deviceUuid !== device_uuid) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const [requesterKey, authorKey] = await Promise.all([
+    getSocialKey(device_uuid),
+    getSocialKey(post.deviceUuid),
+  ]);
+  if (!requesterKey || !authorKey || requesterKey !== authorKey) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
 
   const updated = await prisma.post.update({
     where: { id },
@@ -314,7 +354,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
   const post = await prisma.post.findUnique({ where: { id } });
   if (!post) return res.status(404).json({ error: 'NOT_FOUND' });
-  if (post.deviceUuid !== device_uuid) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const [requesterKey, authorKey] = await Promise.all([
+    getSocialKey(device_uuid),
+    getSocialKey(post.deviceUuid),
+  ]);
+  if (!requesterKey || !authorKey || requesterKey !== authorKey) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
 
   await prisma.post.delete({ where: { id } });
   res.json({ ok: true });
@@ -381,16 +428,22 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
   });
 
   const commentUuids = [...new Set(comments.map((c) => c.deviceUuid))];
-  const commentNicknameMap = await buildNicknameMap(commentUuids);
+  const [commentInfoMap, requesterKey] = await Promise.all([
+    buildAuthorInfoMap(commentUuids),
+    device_uuid ? getSocialKey(device_uuid) : Promise.resolve(null),
+  ]);
 
-  res.json(comments.map((c) => ({
-    id: c.id.toString(),
-    author_id: toAuthorId(c.deviceUuid),
-    nickname: commentNicknameMap.get(c.deviceUuid) ?? null,
-    content: c.content,
-    is_owner: device_uuid ? c.deviceUuid === device_uuid : false,
-    created_at: c.createdAt,
-  })));
+  res.json(comments.map((c) => {
+    const authorInfo = commentInfoMap.get(c.deviceUuid);
+    return {
+      id: c.id.toString(),
+      author_id: toAuthorId(c.deviceUuid),
+      nickname: authorInfo?.nickname ?? null,
+      content: c.content,
+      is_owner: requesterKey !== null && requesterKey === (authorInfo?.socialKey ?? null),
+      created_at: c.createdAt,
+    };
+  }));
 });
 
 // POST /api/v1/posts/:id/comments
@@ -407,14 +460,17 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
     data: { postId: id, deviceUuid: device_uuid, content: content.trim() },
   });
 
-  const nickMap = await buildNicknameMap([device_uuid]);
+  const [authorInfoMap, requesterKey] = await Promise.all([
+    buildAuthorInfoMap([device_uuid]),
+    getSocialKey(device_uuid),
+  ]);
 
   res.status(201).json({
     id: comment.id.toString(),
     author_id: toAuthorId(comment.deviceUuid),
-    nickname: nickMap.get(device_uuid) ?? null,
+    nickname: authorInfoMap.get(device_uuid)?.nickname ?? null,
     content: comment.content,
-    is_owner: true,
+    is_owner: requesterKey !== null,
     created_at: comment.createdAt,
   });
 });
@@ -428,7 +484,14 @@ router.delete('/:id/comments/:commentId', async (req: Request, res: Response) =>
 
   const comment = await prisma.postComment.findUnique({ where: { id: commentId } });
   if (!comment) return res.status(404).json({ error: 'NOT_FOUND' });
-  if (comment.deviceUuid !== device_uuid) return res.status(403).json({ error: 'FORBIDDEN' });
+
+  const [requesterKey, authorKey] = await Promise.all([
+    getSocialKey(device_uuid),
+    getSocialKey(comment.deviceUuid),
+  ]);
+  if (!requesterKey || !authorKey || requesterKey !== authorKey) {
+    return res.status(403).json({ error: 'FORBIDDEN' });
+  }
 
   await prisma.postComment.delete({ where: { id: commentId } });
   res.json({ ok: true });

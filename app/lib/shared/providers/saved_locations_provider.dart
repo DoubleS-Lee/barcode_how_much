@@ -1,42 +1,34 @@
-import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'auth_provider.dart';
+import 'device_provider.dart';
+import '../api/saved_locations_api.dart';
 
-const _kKey = 'saved_locations';
-const _kMax = 8;
-
-class SavedLocationsNotifier extends StateNotifier<List<String>> {
-  SavedLocationsNotifier() : super([]) {
-    _load();
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kKey);
-    if (raw != null) {
-      state = List<String>.from(jsonDecode(raw) as List);
-    }
+class SavedLocationsNotifier extends AsyncNotifier<List<String>> {
+  @override
+  Future<List<String>> build() async {
+    final auth = ref.watch(authProvider).valueOrNull;
+    if (auth == null || !auth.isLoggedIn) return [];
+    final uuid = await ref.watch(deviceUuidProvider.future);
+    return SavedLocationsApi.fetch(uuid);
   }
 
   Future<void> add(String location) async {
+    final auth = ref.read(authProvider).valueOrNull;
+    if (auth == null || !auth.isLoggedIn) return;
     final loc = location.trim();
-    if (loc.isEmpty || state.contains(loc)) return;
-    final updated = [loc, ...state.where((e) => e != loc)].take(_kMax).toList();
-    state = updated;
-    await _save();
+    if (loc.isEmpty) return;
+    final uuid = await ref.read(deviceUuidProvider.future);
+    final updated = await SavedLocationsApi.add(uuid, loc);
+    state = AsyncValue.data(updated);
   }
 
   Future<void> remove(String location) async {
-    state = state.where((e) => e != location).toList();
-    await _save();
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kKey, jsonEncode(state));
+    final uuid = await ref.read(deviceUuidProvider.future);
+    final updated = await SavedLocationsApi.remove(uuid, location);
+    state = AsyncValue.data(updated);
   }
 }
 
 final savedLocationsProvider =
-    StateNotifierProvider<SavedLocationsNotifier, List<String>>(
-        (_) => SavedLocationsNotifier());
+    AsyncNotifierProvider<SavedLocationsNotifier, List<String>>(
+        SavedLocationsNotifier.new);

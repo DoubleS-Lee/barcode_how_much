@@ -16,8 +16,8 @@ import '../../shared/api/scan_api.dart';
 import '../scan_history/scan_history_provider.dart';
 import '../../shared/providers/auth_provider.dart';
 import '../../shared/providers/device_provider.dart';
+
 import '../../shared/providers/scan_settings_provider.dart';
-import '../../shared/utils/device_id.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
 import '../../shared/providers/saved_locations_provider.dart';
 import '../../shared/providers/nickname_provider.dart';
@@ -58,13 +58,36 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 28),
             ],
 
-            // 즐겨찾기 장소
+            // 즐겨찾기 장소 (로그인 상태에서만 활성)
             _SectionTitle('즐겨찾기 장소'),
             const SizedBox(height: 6),
-            Text('자주 가는 매장을 저장해 가격 입력 시 빠르게 선택해요',
-                style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
-            const SizedBox(height: 10),
-            _SavedLocationsSection(),
+            if (ref.watch(authProvider).valueOrNull?.isLoggedIn == true) ...[
+              Text('자주 가는 매장을 저장해 가격 입력 시 빠르게 선택해요',
+                  style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
+              const SizedBox(height: 10),
+              _SavedLocationsSection(),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: kPrimary.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kPrimary.withValues(alpha: 0.15)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock_outline, size: 16, color: kPrimary.withValues(alpha: 0.7)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '로그인하면 자주 가는 매장을 저장하고\n가격 입력 시 빠르게 선택할 수 있어요',
+                        style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant, height: 1.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 28),
 
             // 스캔 피드백
@@ -169,7 +192,7 @@ class SettingsScreen extends ConsumerWidget {
             onPressed: () async {
               Navigator.pop(ctx);
               try {
-                final uuid = await DeviceId.get();
+                final uuid = await ref.read(deviceUuidProvider.future);
                 final deleted = await ScanApi.deleteHistory(uuid);
                 ref.invalidate(scanHistoryProvider);
                 if (context.mounted) {
@@ -209,7 +232,7 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
   /// 소셜 로그인 연동 → 닉네임 반환 (null이면 새 닉네임 입력 필요)
   Future<String?> _socialLink(String provider, String socialId) async {
     try {
-      final uuid = await DeviceId.get();
+      final uuid = await ref.read(deviceUuidProvider.future);
       final resp = await client.dio.post('/api/v1/devices/social-link', data: {
         'device_uuid': uuid,
         'provider': provider,
@@ -287,7 +310,7 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
                 }
                 setS(() { loading = true; errorText = null; });
                 try {
-                  final uuid = await DeviceId.get();
+                  final uuid = await ref.read(deviceUuidProvider.future);
                   await client.dio.post('/api/v1/devices/nickname',
                       data: {'device_uuid': uuid, 'nickname': nickname});
                   final prefs = await SharedPreferences.getInstance();
@@ -325,7 +348,7 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       final account = await _googleSignIn.signIn();
       if (account != null && mounted) {
         await ref.read(authProvider.notifier).setLogin(
-          'google', account.displayName ?? account.email, account.email);
+          'google', account.displayName ?? account.email, account.email, account.id);
         final nickname = await _socialLink('google', account.id);
         if (mounted && nickname == null) await _showNicknameInputDialog();
       }
@@ -352,7 +375,7 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       final name = user.kakaoAccount?.profile?.nickname ?? '카카오 사용자';
       final email = user.kakaoAccount?.email ?? '';
       if (mounted) {
-        await ref.read(authProvider.notifier).setLogin('kakao', name, email);
+        await ref.read(authProvider.notifier).setLogin('kakao', name, email, user.id.toString());
         final nickname = await _socialLink('kakao', user.id.toString());
         if (mounted && nickname == null) await _showNicknameInputDialog();
       }
@@ -373,11 +396,11 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       final result = await FlutterNaverLogin.logIn();
       final account = result.account;
       if (account != null && mounted) {
-        await ref.read(authProvider.notifier).setLogin(
-          'naver', account.name ?? '네이버 사용자', account.email ?? '');
         final socialId = account.id?.isNotEmpty == true
             ? account.id!
             : (account.email ?? '');
+        await ref.read(authProvider.notifier).setLogin(
+          'naver', account.name ?? '네이버 사용자', account.email ?? '', socialId);
         final nickname = await _socialLink('naver', socialId);
         if (mounted && nickname == null) await _showNicknameInputDialog();
       }
@@ -903,7 +926,7 @@ class _SavedLocationsSectionState extends ConsumerState<_SavedLocationsSection> 
 
   @override
   Widget build(BuildContext context) {
-    final locations = ref.watch(savedLocationsProvider);
+    final locations = ref.watch(savedLocationsProvider).valueOrNull ?? [];
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
