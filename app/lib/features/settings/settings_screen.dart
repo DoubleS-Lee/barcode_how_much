@@ -22,7 +22,7 @@ import '../../shared/widgets/app_bottom_nav.dart';
 import '../../shared/providers/saved_locations_provider.dart';
 import '../../shared/providers/nickname_provider.dart';
 
-const _kSupportEmail = _kSupportEmail;
+const _kSupportEmail = 'lss8825@gmail.com';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
