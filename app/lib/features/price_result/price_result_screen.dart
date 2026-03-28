@@ -896,6 +896,7 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
             'price': candidate['price'] as int,
             'is_lowest': false,
             'url': candidate['shopping_url'] as String? ?? '',
+            'image_url': candidate['image_url'] as String?,
           };
           final merged = [...nonNaver, newNaver];
           final minP = merged.map((p) => p['price'] as int).reduce((a, b) => a < b ? a : b);
@@ -939,7 +940,8 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
                 productName: productName,
                 price: naverEntry.first['price'] as int,
                 shoppingUrl: naverEntry.first['url'] as String? ?? '',
-                imageUrl: widget.data['image_url'] as String?,
+                imageUrl: naverEntry.first['image_url'] as String?
+                    ?? widget.data['image_url'] as String?,
               );
             } catch (_) {}
           }

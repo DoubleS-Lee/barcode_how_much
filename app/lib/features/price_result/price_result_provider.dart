@@ -39,6 +39,7 @@ class PriceResultNotifier
                   'platform': p['platform'] as String,
                   'price': p['price'] as int,
                   'is_lowest': p['is_lowest'] as bool,
+                  if (p['url'] != null) 'url': p['url'] as String,
                 })
             .toList(),
       );

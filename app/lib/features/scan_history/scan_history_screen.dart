@@ -143,15 +143,25 @@ class _ProductGroup {
   });
 
   int? get latestOnlinePrice => scans.first['lowest_online_price'] as int?;
+  String? get latestOnlineUrl => scans.first['lowest_online_url'] as String?;
   DateTime get latestScannedAt => DateTime.parse(scans.first['scanned_at'] as String);
 
   int? get latestOfflinePrice {
     for (final scan in scans) {
-      final p = scan['offline_price'] as int?;
-      if (p != null) return p;
+      if ((scan['offline_price'] as int?) != null) return scan['offline_price'] as int;
     }
     return null;
   }
+
+  Map<String, dynamic>? get _latestOfflineScan {
+    for (final scan in scans) {
+      if ((scan['offline_price'] as int?) != null) return scan;
+    }
+    return null;
+  }
+
+  String? get latestOfflineStoreHint => _latestOfflineScan?['store_hint'] as String?;
+  String? get latestOfflineMemo => _latestOfflineScan?['memo'] as String?;
 
   int? get allTimeLowestPrice {
     final prices = scans
@@ -463,7 +473,7 @@ class _NaverCandidateSheetState extends State<_NaverCandidateSheet> {
       await ScanApi.relinkNaver(
         deviceUuid: deviceUuid,
         barcode: widget.barcode,
-        productName: candidate['product_name'] as String,
+        productName: widget.productName, // 사용자가 설정한 상품명 그대로 유지
         price: candidate['price'] as int,
         shoppingUrl: candidate['shopping_url'] as String,
         imageUrl: candidate['image_url'] as String?,
@@ -633,13 +643,14 @@ class _GroupedProductCard extends StatefulWidget {
   State<_GroupedProductCard> createState() => _GroupedProductCardState();
 }
 
+enum _ImageMenuOption { camera, gallery, autoMatch, delete }
+
 class _GroupedProductCardState extends State<_GroupedProductCard> {
   bool _showHistory = false;
   bool _uploadingImage = false;
 
   Future<void> _pickProductImage() async {
-    final picker = ImagePicker();
-    final source = await showModalBottomSheet<ImageSource>(
+    final option = await showModalBottomSheet<_ImageMenuOption>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -650,20 +661,26 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
           Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 12),
           ListTile(
+            leading: const Icon(Icons.auto_awesome_outlined, color: kPrimary),
+            title: Text('자동으로 매칭', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: kPrimary)),
+            subtitle: Text('네이버 쇼핑에서 상품 이미지 가져오기', style: GoogleFonts.inter(fontSize: 12)),
+            onTap: () => Navigator.pop(ctx, _ImageMenuOption.autoMatch),
+          ),
+          ListTile(
             leading: const Icon(Icons.camera_alt_outlined),
             title: Text('카메라로 촬영', style: GoogleFonts.inter()),
-            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            onTap: () => Navigator.pop(ctx, _ImageMenuOption.camera),
           ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: Text('갤러리에서 선택', style: GoogleFonts.inter()),
-            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            onTap: () => Navigator.pop(ctx, _ImageMenuOption.gallery),
           ),
           if (widget.group.imageUrl != null)
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
               title: Text('사진 삭제', style: GoogleFonts.inter(color: Colors.red)),
-              onTap: () => Navigator.pop(ctx, null),
+              onTap: () => Navigator.pop(ctx, _ImageMenuOption.delete),
             ),
           const SizedBox(height: 8),
         ]),
@@ -671,29 +688,85 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
     );
     if (!mounted) return;
 
-    if (source == null && widget.group.imageUrl != null) {
-      // 삭제 선택 시 — 현재 미구현, 필요 시 추가
-      return;
+    switch (option) {
+      case _ImageMenuOption.autoMatch:
+        _repricingByName(context, widget.ref, widget.group.barcode, widget.group.name);
+        return;
+      case _ImageMenuOption.delete:
+        return; // 미구현
+      case _ImageMenuOption.camera:
+      case _ImageMenuOption.gallery:
+        final source = option == _ImageMenuOption.camera ? ImageSource.camera : ImageSource.gallery;
+        final picker = ImagePicker();
+        final picked = await picker.pickImage(source: source, imageQuality: 90);
+        if (picked == null || !mounted) return;
+        setState(() => _uploadingImage = true);
+        try {
+          final compressed = await compressImage(File(picked.path));
+          await ScanApi.uploadProductImage(barcode: widget.group.barcode, imageFile: compressed);
+          widget.ref.invalidate(scanHistoryProvider);
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red.shade700),
+            );
+          }
+        } finally {
+          if (mounted) setState(() => _uploadingImage = false);
+        }
+        return;
+      case null:
+        return;
     }
-    if (source == null) return;
+  }
 
-    final picked = await picker.pickImage(source: source, imageQuality: 90);
-    if (picked == null || !mounted) return;
-
-    setState(() => _uploadingImage = true);
+  Future<void> _launchUrl(String? url) async {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
     try {
-      final compressed = await compressImage(File(picked.path));
-      await ScanApi.uploadProductImage(barcode: widget.group.barcode, imageFile: compressed);
-      widget.ref.invalidate(scanHistoryProvider);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red.shade700),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _uploadingImage = false);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
     }
+  }
+
+  void _showOfflineInfo(BuildContext context, String? storeHint, String? memo) {
+    if (storeHint == null && memo == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          const Icon(Icons.store_outlined, color: kAmber, size: 20),
+          const SizedBox(width: 8),
+          Text('오프라인 정보', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (storeHint != null) ...[
+              Row(children: [
+                const Icon(Icons.place_outlined, size: 16, color: kOnSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(child: Text(storeHint, style: GoogleFonts.inter(fontSize: 14))),
+              ]),
+              if (memo != null) const SizedBox(height: 8),
+            ],
+            if (memo != null)
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Icon(Icons.notes, size: 16, color: kOnSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(child: Text(memo, style: GoogleFonts.inter(fontSize: 14))),
+              ]),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('확인', style: GoogleFonts.inter(fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -776,45 +849,67 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 가격
+                // 가격 (탭 가능)
                 Row(children: [
-                  Flexible(child: Wrap(spacing: 6, runSpacing: 2, children: [
-                    // 온라인 가격 (더 싸면 음영)
+                  Flexible(child: Wrap(spacing: 6, runSpacing: 4, children: [
+                    // 온라인 가격
                     if (latestOnlinePrice != null)
-                      headerOnlineCheaper
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: kPrimary.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '온라인 ${nf.format(latestOnlinePrice)}원',
-                                style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: kPrimary),
-                              ),
-                            )
-                          : Text(
+                      GestureDetector(
+                        onTap: () => _launchUrl(group.latestOnlineUrl),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: headerOnlineCheaper
+                                ? kPrimary.withValues(alpha: 0.10)
+                                : Colors.grey.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: kPrimary.withValues(alpha: headerOnlineCheaper ? 0.3 : 0.15),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(
                               '온라인 ${nf.format(latestOnlinePrice)}원',
-                              style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: kPrimary),
+                              style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w800, color: kPrimary),
                             ),
-                    // 오프라인 가격 (더 싸면 음영)
+                            const SizedBox(width: 3),
+                            Icon(Icons.open_in_new, size: 11, color: kPrimary.withValues(alpha: 0.6)),
+                          ]),
+                        ),
+                      ),
+                    // 오프라인 가격
                     if (latestOfflinePrice != null)
-                      headerOfflineCheaper
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: kAmber.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '오프라인 ${nf.format(latestOfflinePrice)}원',
-                                style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: kAmber),
-                              ),
-                            )
-                          : Text(
-                              '오프라인 ${nf.format(latestOfflinePrice)}원',
-                              style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700, color: kAmber),
+                      GestureDetector(
+                        onTap: () => _showOfflineInfo(
+                          context,
+                          group.latestOfflineStoreHint,
+                          group.latestOfflineMemo,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: headerOfflineCheaper
+                                ? kAmber.withValues(alpha: 0.12)
+                                : Colors.grey.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: kAmber.withValues(alpha: headerOfflineCheaper ? 0.4 : 0.2),
+                              width: 1,
                             ),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text(
+                              '오프라인 ${nf.format(latestOfflinePrice)}원',
+                              style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w800, color: kAmber),
+                            ),
+                            if (group.latestOfflineStoreHint != null || group.latestOfflineMemo != null) ...[
+                              const SizedBox(width: 3),
+                              Icon(Icons.info_outline, size: 11, color: kAmber.withValues(alpha: 0.7)),
+                            ],
+                          ]),
+                        ),
+                      ),
                     // 온/오프 모두 없을 때 대비
                     if (latestOnlinePrice == null && latestOfflinePrice == null && latestPrice != null)
                       Text(
@@ -1016,6 +1111,55 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
     _ => '온라인',
   };
 
+  Future<void> _launchUrl(String? url) async {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+    }
+  }
+
+  void _showOfflineInfoDialog() {
+    if (_storeHint == null && _memo == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          const Icon(Icons.store_outlined, color: kAmber, size: 20),
+          const SizedBox(width: 8),
+          Text('오프라인 정보', style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_storeHint != null) ...[
+              Row(children: [
+                const Icon(Icons.place_outlined, size: 16, color: kOnSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_storeHint!, style: GoogleFonts.inter(fontSize: 14))),
+              ]),
+              if (_memo != null) const SizedBox(height: 8),
+            ],
+            if (_memo != null)
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Icon(Icons.notes, size: 16, color: kOnSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_memo!, style: GoogleFonts.inter(fontSize: 14))),
+              ]),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('확인', style: GoogleFonts.inter(fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
+
   Future<void> _confirmDelete() async {
     final scanId = widget.scan['scan_id'] as String?;
     if (scanId == null) return;
@@ -1165,6 +1309,7 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
     final dateLabel = DateFormat('yy.MM.dd HH:mm').format(scannedAt);
     final onlinePrice = scan['lowest_online_price'] as int?;
     final platform = scan['lowest_online_platform'] as String?;
+    final onlineUrl = scan['lowest_online_url'] as String?;
 
     // 이 scanId에 방금 저장된 가격이 있으면 우선 표시 (프로모션 단가 포함 즉각 반영)
     final scanId = scan['scan_id'] as String? ?? '';
@@ -1203,47 +1348,57 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
             ]),
             const SizedBox(height: 3),
 
-            // 온라인/오프라인 가격 (더 저렴한 쪽에 음영)
+            // 온라인/오프라인 가격 (탭 가능)
             if (onlinePrice != null || displayOfflinePrice != null)
-              Wrap(spacing: 8, runSpacing: 2, children: [
-                if (onlinePrice != null) ...[
-                  if (diff != null && diff > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                if (onlinePrice != null)
+                  GestureDetector(
+                    onTap: () => _launchUrl(onlineUrl),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: kPrimary.withValues(alpha: 0.10),
+                        color: (diff != null && diff > 0)
+                            ? kPrimary.withValues(alpha: 0.10)
+                            : Colors.grey.withValues(alpha: 0.07),
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: kPrimary.withValues(alpha: 0.2), width: 1),
                       ),
-                      child: Text(
-                        '${_platformLabel(platform)} ${nf.format(onlinePrice)}원',
-                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: kPrimary),
-                      ),
-                    )
-                  else
-                    Text(
-                      '${_platformLabel(platform)} ${nf.format(onlinePrice)}원',
-                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: kPrimary),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(
+                          '${_platformLabel(platform)} ${nf.format(onlinePrice)}원',
+                          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: kPrimary),
+                        ),
+                        if (onlineUrl != null) ...[
+                          const SizedBox(width: 2),
+                          Icon(Icons.open_in_new, size: 10, color: kPrimary.withValues(alpha: 0.6)),
+                        ],
+                      ]),
                     ),
-                ],
-                if (displayOfflinePrice != null) ...[
-                  if (diff != null && diff < 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  ),
+                if (displayOfflinePrice != null)
+                  GestureDetector(
+                    onTap: (_storeHint != null || _memo != null) ? _showOfflineInfoDialog : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.12),
+                        color: (diff != null && diff < 0)
+                            ? kAmber.withValues(alpha: 0.12)
+                            : Colors.grey.withValues(alpha: 0.07),
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: kAmber.withValues(alpha: 0.25), width: 1),
                       ),
-                      child: Text(
-                        '오프라인 ${nf.format(displayOfflinePrice)}원',
-                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: kAmber),
-                      ),
-                    )
-                  else
-                    Text(
-                      '오프라인 ${nf.format(displayOfflinePrice)}원',
-                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: kAmber),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(
+                          '오프라인 ${nf.format(displayOfflinePrice)}원',
+                          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: kAmber),
+                        ),
+                        if (_storeHint != null || _memo != null) ...[
+                          const SizedBox(width: 2),
+                          Icon(Icons.info_outline, size: 10, color: kAmber.withValues(alpha: 0.7)),
+                        ],
+                      ]),
                     ),
-                ],
+                  ),
               ]),
 
             // 차액 표시

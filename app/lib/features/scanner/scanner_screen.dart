@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -97,11 +98,22 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         await context.push('/price-result/$barcode');
         await _cameraController?.start();
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
+        String message;
+        if (e is DioException && e.type == DioExceptionType.connectionTimeout ||
+            e is DioException && e.type == DioExceptionType.receiveTimeout) {
+          message = '서버 응답이 너무 느려요.\n잠시 후 다시 시도해주세요.';
+        } else if (e is DioException && e.type == DioExceptionType.connectionError) {
+          message = '인터넷 연결을 확인해주세요.\n마트 안이라면 조금 이동 후 다시 시도해보세요.';
+        } else if (e is DioException && e.response?.statusCode == 404) {
+          message = '등록되지 않은 상품이에요.\n다른 바코드를 스캔해주세요.';
+        } else {
+          message = '오류가 발생했어요.\n잠시 후 다시 시도해주세요.';
+        }
         setState(() {
           _isLoading = false;
-          _errorMessage = '마트 안이라 인터넷이 느려요!\n조금 이동해서 다시 찍어볼까요?';
+          _errorMessage = message;
         });
         await _cameraController?.start();
       }

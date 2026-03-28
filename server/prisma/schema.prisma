@@ -56,13 +56,14 @@ model Scan {
 
 // 상품 스캔 시 플랫폼별 온라인 가격 (모든 플랫폼 저장 — 빅데이터 핵심)
 model OnlinePrice {
-  id        BigInt   @id @default(autoincrement())
-  scanId    BigInt   @map("scan_id")
-  scan      Scan     @relation(fields: [scanId], references: [id])
-  platform  String   @db.VarChar(30)
-  price     Int
-  isLowest  Boolean  @default(false) @map("is_lowest")
-  fetchedAt DateTime @default(now()) @map("fetched_at")
+  id         BigInt   @id @default(autoincrement())
+  scanId     BigInt   @map("scan_id")
+  scan       Scan     @relation(fields: [scanId], references: [id])
+  platform   String   @db.VarChar(30)
+  price      Int
+  isLowest   Boolean  @default(false) @map("is_lowest")
+  productUrl String?  @map("product_url") @db.VarChar(500)
+  fetchedAt  DateTime @default(now()) @map("fetched_at")
 
   @@map("online_prices")
 }

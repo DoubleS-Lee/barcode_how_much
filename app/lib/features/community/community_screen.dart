@@ -20,13 +20,84 @@ import '../../shared/widgets/app_bottom_nav.dart';
 
 // ── 프로바이더 ────────────────────────────────────────────
 
-final _postsProvider = FutureProvider.autoDispose
-    .family<List<PostModel>, String>((ref, search) async {
-  final deviceUuid = await DeviceId.get();
-  return PostsApi.fetchPosts(search: search.isEmpty ? null : search, deviceUuid: deviceUuid);
-});
+const _sortOptions = [
+  ('latest', '최신순'),
+  ('likes', '추천순'),
+  ('popular', '인기순'),
+  ('comments', '댓글순'),
+];
 
-final _deviceUuidProvider = FutureProvider<String>((ref) => DeviceId.get());
+class _PostsData {
+  final List<PostModel> posts;
+  final bool hasMore;
+  final bool isLoadingMore;
+  const _PostsData({required this.posts, required this.hasMore, this.isLoadingMore = false});
+  _PostsData copyWith({List<PostModel>? posts, bool? hasMore, bool? isLoadingMore}) =>
+      _PostsData(posts: posts ?? this.posts, hasMore: hasMore ?? this.hasMore, isLoadingMore: isLoadingMore ?? this.isLoadingMore);
+}
+
+class _PostsNotifier extends StateNotifier<AsyncValue<_PostsData>> {
+  _PostsNotifier({required String search, required String sort})
+      : _search = search,
+        _sort = sort,
+        super(const AsyncValue.loading()) {
+    _loadPage(1);
+  }
+
+  final String _search;
+  final String _sort;
+  int _currentPage = 0;
+  bool _isLoadingMore = false;
+
+  Future<void> _loadPage(int page) async {
+    try {
+      final deviceUuid = await DeviceId.get();
+      final result = await PostsApi.fetchPosts(
+        page: page,
+        search: _search.isEmpty ? null : _search,
+        sort: _sort,
+        deviceUuid: deviceUuid,
+      );
+      if (!mounted) return;
+      if (page == 1) {
+        state = AsyncValue.data(_PostsData(posts: result.posts, hasMore: result.hasMore));
+      } else {
+        final prev = state.valueOrNull;
+        if (prev != null) {
+          state = AsyncValue.data(_PostsData(
+            posts: [...prev.posts, ...result.posts],
+            hasMore: result.hasMore,
+          ));
+        }
+      }
+      _currentPage = result.page;
+    } catch (e, st) {
+      if (!mounted) return;
+      if (page == 1) state = AsyncValue.error(e, st);
+    } finally {
+      _isLoadingMore = false;
+    }
+  }
+
+  Future<void> loadMore() async {
+    if (_isLoadingMore || state.valueOrNull?.hasMore != true) return;
+    _isLoadingMore = true;
+    final prev = state.valueOrNull;
+    if (prev != null) state = AsyncValue.data(prev.copyWith(isLoadingMore: true));
+    await _loadPage(_currentPage + 1);
+  }
+
+  Future<void> refresh() async {
+    _currentPage = 0;
+    state = const AsyncValue.loading();
+    await _loadPage(1);
+  }
+}
+
+final _postsProvider = StateNotifierProvider.autoDispose
+    .family<_PostsNotifier, AsyncValue<_PostsData>, (String, String)>(
+  (ref, key) => _PostsNotifier(search: key.$1, sort: key.$2),
+);
 
 // ── 메인 화면 ─────────────────────────────────────────────
 
@@ -39,12 +110,27 @@ class CommunityScreen extends ConsumerStatefulWidget {
 
 class _CommunityScreenState extends ConsumerState<CommunityScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
   String _searchQuery = '';
+  String _sort = 'latest';
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(_onScroll);
+  }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 300) {
+      ref.read(_postsProvider((_searchQuery, _sort)).notifier).loadMore();
+    }
   }
 
   void _onSearchChanged(String v) {
@@ -53,7 +139,7 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final postsAsync = ref.watch(_postsProvider(_searchQuery));
+    final postsAsync = ref.watch(_postsProvider((_searchQuery, _sort)));
 
     return Scaffold(
       backgroundColor: kBackground,
@@ -71,7 +157,7 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: kPrimary),
-            onPressed: () => ref.invalidate(_postsProvider(_searchQuery)),
+            onPressed: () => ref.read(_postsProvider((_searchQuery, _sort)).notifier).refresh(),
           ),
         ],
       ),
@@ -108,6 +194,37 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
+          // ── 정렬 탭 ──
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _sortOptions.map((opt) {
+                  final isSelected = _sort == opt.$1;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(opt.$2,
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                            color: isSelected ? Colors.white : kOnSurfaceVariant,
+                          )),
+                      selected: isSelected,
+                      selectedColor: kPrimary,
+                      backgroundColor: kBackground,
+                      side: BorderSide.none,
+                      showCheckmark: false,
+                      onSelected: (_) => setState(() => _sort = opt.$1),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+
           // ── 배너 광고 ──
           if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS))
@@ -118,20 +235,29 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
             child: postsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => _ErrorView(
-                  onRetry: () => ref.invalidate(_postsProvider(_searchQuery))),
-              data: (posts) => posts.isEmpty
+                  onRetry: () => ref.read(_postsProvider((_searchQuery, _sort)).notifier).refresh()),
+              data: (data) => data.posts.isEmpty
                   ? _EmptyView(isSearch: _searchQuery.isNotEmpty)
                   : RefreshIndicator(
                       onRefresh: () async =>
-                          ref.invalidate(_postsProvider(_searchQuery)),
+                          ref.read(_postsProvider((_searchQuery, _sort)).notifier).refresh(),
                       child: ListView.builder(
+                        controller: _scrollCtrl,
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
-                        itemCount: posts.length,
-                        itemBuilder: (_, i) => _PostCard(
-                          post: posts[i],
-                          onRefresh: () =>
-                              ref.invalidate(_postsProvider(_searchQuery)),
-                        ),
+                        itemCount: data.posts.length + (data.hasMore ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (i == data.posts.length) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 20),
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          return _PostCard(
+                            post: data.posts[i],
+                            onRefresh: () =>
+                                ref.read(_postsProvider((_searchQuery, _sort)).notifier).refresh(),
+                          );
+                        },
                       ),
                     ),
             ),
@@ -171,7 +297,9 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                context.push('/settings');
+                Future.microtask(() {
+                  if (context.mounted) context.push('/settings');
+                });
               },
               child: Text('로그인하러 가기', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
             ),
@@ -190,7 +318,7 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => _PostFormSheet(
         editing: editing,
-        onSaved: () => ref.invalidate(_postsProvider(_searchQuery)),
+        onSaved: () => ref.read(_postsProvider((_searchQuery, _sort)).notifier).refresh(),
       ),
     );
   }
@@ -295,9 +423,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
 
   @override
   Widget build(BuildContext context) {
-    final deviceAsync = ref.watch(_deviceUuidProvider);
-    final myUuid = deviceAsync.valueOrNull;
-    final isOwner = myUuid != null && myUuid.startsWith(_post.authorId);
+    final isOwner = _post.isOwner;
 
     // 20회 이상 신고된 글은 차단
     if (_post.reportCount >= 20) {
@@ -546,7 +672,16 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
   void initState() {
     super.initState();
     _post = widget.post;
+    _recordView();
     _loadComments();
+  }
+
+  Future<void> _recordView() async {
+    try {
+      final uuid = await DeviceId.get();
+      final updated = await PostsApi.fetchPost(id: _post.id, deviceUuid: uuid);
+      if (mounted) setState(() => _post = updated);
+    } catch (_) {}
   }
 
   @override

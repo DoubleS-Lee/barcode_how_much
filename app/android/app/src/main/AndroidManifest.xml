@@ -79,5 +79,14 @@
         </intent>
         <!-- ✅ KakaoTalk 설치 여부 확인 -->
         <package android:name="com.kakao.talk" />
+        <!-- ✅ url_launcher — https/http 링크 열기 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
     </queries>
 </manifest>

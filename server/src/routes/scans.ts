@@ -39,6 +39,7 @@ const scanRequestSchema = z.object({
     platform: z.string(),
     price: z.number().int().positive(),
     is_lowest: z.boolean(),
+    url: z.string().url().optional().nullable(),
   })).optional(),
   barcode_content: z.object({
     raw_value: z.string(),
@@ -80,6 +81,7 @@ router.post('/', async (req: Request, res: Response) => {
         platform: p.platform,
         price: p.price,
         isLowest: p.is_lowest,
+        productUrl: p.url ?? null,
       })),
     });
   }
@@ -105,8 +107,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // POST /api/v1/scans/:scanId/offline-price — 오프라인 가격 최초 저장
 router.post('/:scanId/offline-price', async (req: Request, res: Response) => {
-  const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
-  const scanId = BigInt(scanIdParam);
+  const scanId = BigInt(req.params.scanId as string);
   const schema = z.object({
     price: z.number().int().positive(),
     store_hint: z.string().optional().nullable(),
@@ -134,8 +135,7 @@ router.post('/:scanId/offline-price', async (req: Request, res: Response) => {
 
 // PATCH /api/v1/scans/:scanId/offline-price — 오프라인 가격/장소/메모 수정 (없으면 생성)
 router.patch('/:scanId/offline-price', async (req: Request, res: Response) => {
-  const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
-  const scanId = BigInt(scanIdParam);
+  const scanId = BigInt(req.params.scanId as string);
   const schema = z.object({
     price: z.number().int().positive().optional(),
     store_hint: z.string().nullable().optional(),
@@ -224,6 +224,7 @@ router.get('/history', async (req: Request, res: Response) => {
             },
             lowest_online_price: lowestOnline?.price ?? null,
             lowest_online_platform: lowestOnline?.platform ?? null,
+            lowest_online_url: lowestOnline?.productUrl ?? null,
             offline_price: offlinePrice?.price ?? null,
             store_hint: offlinePrice?.storeHint ?? null,
             memo: offlinePrice?.memo ?? null,
@@ -293,8 +294,7 @@ router.delete('/history', async (req: Request, res: Response) => {
 
 // DELETE /api/v1/scans/:scanId — 단일 스캔 삭제 (history 라우트보다 뒤에 위치해야 함)
 router.delete('/:scanId', async (req: Request, res: Response) => {
-  const scanIdParam = Array.isArray(req.params.scanId) ? req.params.scanId[0] : req.params.scanId;
-  const scanId = BigInt(scanIdParam);
+  const scanId = BigInt(req.params.scanId as string);
 
   await prisma.onlinePrice.deleteMany({ where: { scanId } });
   await prisma.offlinePrice.deleteMany({ where: { scanId } });
@@ -306,7 +306,7 @@ router.delete('/:scanId', async (req: Request, res: Response) => {
 
 // PUT /api/v1/scans/products/:barcode/image — 상품 대표 이미지 업로드
 router.put('/products/:barcode/image', productImageUpload.single('image'), async (req: Request, res: Response) => {
-  const { barcode } = req.params;
+  const barcode = req.params.barcode as string;
   if (!req.file) return res.status(400).json({ error: 'NO_FILE' });
 
   const baseUrl = `${req.protocol}://${req.get('host')}`;

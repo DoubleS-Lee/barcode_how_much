@@ -13,7 +13,7 @@ class ScanApi {
   }) async {
     final body = <String, dynamic>{
       'device_uuid': deviceUuid,
-      'os': 'android', // Windows 데스크톱 테스트용 기본값
+      'os': Platform.isIOS ? 'ios' : 'android',
       'app_version': '1.0.0',
       'scan_type': scanType,
       if (barcode != null) 'barcode': barcode,

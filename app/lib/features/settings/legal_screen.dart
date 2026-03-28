@@ -11,7 +11,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '개인정보처리방침',
-      lastUpdated: '2026년 3월 27일',
+      lastUpdated: '2026년 3월 28일',
       sections: const [
         _Section(
           title: '1. 개인정보 수집 항목 및 수집 방법',
@@ -25,7 +25,6 @@ class PrivacyPolicyScreen extends StatelessWidget {
               '• 오프라인 가격 입력값, 장소명, 메모: 이용자가 직접 입력\n'
               '• 게시글 내용(제목, 본문, 가격, 첨부 이미지): 이용자가 직접 작성\n'
               '• 찜 목록(관심 바코드): 이용자가 직접 등록\n'
-              '• FCM 푸시 알림 토큰: 알림 수신 동의 시 수집\n'
               '• 소셜 로그인 정보(이름, 이메일): 구글·카카오·네이버 로그인 선택 시 수집\n\n'
               '수집 방법: 앱 내 이용자 직접 입력, 서비스 이용 과정에서 자동 수집\n\n'
               '※ 서비스는 GPS 등 기기 위치 정보를 수집하지 않습니다.',
@@ -45,8 +44,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
           body: '수집된 개인정보는 서비스 이용 목적이 달성된 후 즉시 파기합니다.\n\n'
               '• 스캔 이력, 가격 정보, 찜 목록: 이용자가 직접 삭제하거나 서비스 탈퇴 요청 시까지\n'
               '• 게시글·댓글: 게시 삭제 요청 시까지\n'
-              '• 기기 정보(UUID, OS): 마지막 앱 사용일로부터 1년\n'
-              '• FCM 토큰: 알림 수신 철회 또는 서비스 탈퇴 시까지\n\n'
+              '• 기기 정보(UUID, OS): 마지막 앱 사용일로부터 1년\n\n'
               '단, 관련 법령에 의해 보존이 필요한 경우 해당 기간 동안 보관합니다.',
         ),
         _Section(
@@ -63,8 +61,8 @@ class PrivacyPolicyScreen extends StatelessWidget {
               '【국외 이전】\n'
               '• 이전받는 자: Google LLC\n'
               '  이전 국가: 미국 (및 Google 데이터 센터 소재 국가)\n'
-              '  이전 항목: 기기 UUID, FCM 토큰, 앱 이용 데이터\n'
-              '  이전 목적: 푸시 알림 발송(Firebase Cloud Messaging), 앱 안정성 분석\n'
+              '  이전 항목: 기기 UUID, 앱 이용 데이터\n'
+              '  이전 목적: 앱 안정성 분석(Firebase Analytics)\n'
               '  보유 기간: 서비스 이용 종료 시까지\n'
               '  연락처: https://policies.google.com/privacy\n\n'
               '• 이전받는 자: Apple Inc.\n'
@@ -81,8 +79,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
           body: '이용자는 언제든지 다음과 같은 개인정보 보호 권리를 행사할 수 있습니다.\n\n'
               '• 개인정보 조회: 앱 내 스캔 기록 화면에서 직접 확인\n'
               '• 개인정보 삭제: 설정 > 스캔 기록 전체 삭제 기능 이용\n'
-              '• 게시글 삭제: 게시판 내 본인 게시글 직접 삭제\n'
-              '• 푸시 알림 수신 거부: 기기 설정에서 알림 비허용\n\n'
+              '• 게시글 삭제: 게시판 내 본인 게시글 직접 삭제\n\n'
               '위 방법으로 해결되지 않는 경우 아래 연락처로 문의해주세요.',
         ),
         _Section(
@@ -99,7 +96,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
         _Section(
           title: '9. 개인정보 보호책임자',
           body: '개인정보 처리에 관한 문의, 불만, 피해구제는 아래로 연락해주세요.\n\n'
-              '• 이메일: eolmaeossjeo@gmail.com\n'
+              '• 이메일: lss8825@gmail.com\n'
               '• 처리 기간: 접수 후 7영업일 이내 회신\n\n'
               '또한 개인정보 침해 관련 신고 및 상담은 아래 기관에 문의하실 수 있습니다.\n'
               '• 개인정보보호위원회: privacy.go.kr / 국번없이 182\n'
@@ -109,7 +106,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
           title: '10. 개인정보처리방침 변경',
           body: '본 방침은 법령·정책 변경이나 서비스 변경에 따라 수정될 수 있습니다.\n'
               '변경 시 앱 내 공지 또는 업데이트를 통해 사전 고지합니다.\n\n'
-              '시행일: 2026년 3월 27일',
+              '시행일: 2026년 3월 28일',
         ),
       ],
     );
@@ -125,7 +122,7 @@ class TermsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '이용약관',
-      lastUpdated: '2026년 3월 27일',
+      lastUpdated: '2026년 3월 28일',
       sections: const [
         _Section(
           title: '제1조 (목적)',
@@ -199,8 +196,8 @@ class TermsScreen extends StatelessWidget {
         _Section(
           title: '제10조 (문의)',
           body: '본 약관에 관한 문의는 아래 연락처로 해주세요.\n\n'
-              '• 이메일: eolmaeossjeo@gmail.com\n\n'
-              '시행일: 2026년 3월 27일',
+              '• 이메일: lss8825@gmail.com\n\n'
+              '시행일: 2026년 3월 28일',
         ),
       ],
     );
@@ -216,7 +213,7 @@ class MarketingInfoScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LegalScreen(
       title: '마케팅 정보 수신',
-      lastUpdated: '2026년 3월 27일',
+      lastUpdated: '2026년 3월 28일',
       sections: const [
         _Section(
           title: '수신 동의 목적',

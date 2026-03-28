@@ -2,22 +2,20 @@ import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_naver_login/flutter_naver_login.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart' as kakao;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme.dart';
 import '../../shared/api/scan_api.dart';
 import '../scan_history/scan_history_provider.dart';
 import '../../shared/providers/auth_provider.dart';
+import '../../shared/providers/device_provider.dart';
 import '../../shared/providers/scan_settings_provider.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
-
-// 디바이스 UUID
-final _deviceUuidProvider = FutureProvider<String>((ref) => DeviceId.get());
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -104,8 +102,19 @@ class SettingsScreen extends ConsumerWidget {
               icon: Icons.mail_outline,
               iconColor: kOnSurfaceVariant,
               title: '문의하기',
-              subtitle: 'eolmaeossjeo@gmail.com',
-              onTap: () => _showSnackbar(context, '이메일 앱으로 이동합니다'),
+              subtitle: 'lss8825@gmail.com',
+              onTap: () async {
+                final uri = Uri(
+                  scheme: 'mailto',
+                  path: 'lss8825@gmail.com',
+                  query: 'subject=얼마였지? 문의',
+                );
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
+                } else if (context.mounted) {
+                  _showSnackbar(context, '이메일 앱을 열 수 없습니다');
+                }
+              },
             ),
             _ActionTile(
               icon: Icons.star_outline,
@@ -173,7 +182,7 @@ class _SocialLoginSection extends ConsumerStatefulWidget {
 class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
   bool _loading = false;
 
-  final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+  static final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
   Future<void> _loginGoogle() async {
     if (kIsWeb || (!defaultTargetPlatform.isMobileOrMac)) {
@@ -547,7 +556,7 @@ class _InfoTile extends StatelessWidget {
 class _DeviceUuidTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final uuidAsync = ref.watch(_deviceUuidProvider);
+    final uuidAsync = ref.watch(deviceUuidProvider);
     final uuid = uuidAsync.valueOrNull ?? '로딩 중...';
     return GestureDetector(
       onTap: () {

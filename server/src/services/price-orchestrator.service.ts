@@ -3,6 +3,7 @@ import { searchNaver } from './naver.service';
 import { searchOpenFoodFacts } from './openfoodfacts.service';
 import { searchFoodSafety } from './foodsafety.service';
 import { PriceResponse, PriceEntry } from '../types/price.types';
+import { logger } from '../utils/logger';
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -27,7 +28,7 @@ export async function priceOrchestrator(
 
   if (knownProductName) {
     // 자체 DB에 상품명 있음 → 쿠팡만 가격용으로 호출
-    console.log(`[Orchestrator] Using cached product name: "${knownProductName}"`);
+    logger.info('Orchestrator', `Using cached product name: "${knownProductName}"`);
     const [coupangSettled] = await Promise.allSettled([
       withTimeout(searchCoupang(barcode), timeout),
     ]);
@@ -46,7 +47,7 @@ export async function priceOrchestrator(
     coupangResult = coupangSettled.status === 'fulfilled' ? coupangSettled.value : null;
 
     if (coupangSettled.status === 'rejected') {
-      console.warn('[Orchestrator] Coupang failed:', (coupangSettled.reason as Error)?.message);
+      logger.warn('Orchestrator', 'Coupang failed', (coupangSettled.reason as Error)?.message);
     }
 
     // 네이버 바코드 Step 1 실패 시 fallback 검색어 우선순위: 쿠팡(실제키) > OFF > 식약처
@@ -55,7 +56,7 @@ export async function priceOrchestrator(
       || foodSafetyResult?.productName;
 
     if (lookupName) {
-      console.log(`[Orchestrator] Lookup name for Naver: "${lookupName}"`);
+      logger.info('Orchestrator', `Lookup name for Naver: "${lookupName}"`);
     }
   }
 
@@ -65,7 +66,7 @@ export async function priceOrchestrator(
   // - lookupName 없으면: 바코드→상품명→재검색 2단계 (시간 더 필요)
   let naverResult = null;
   if (linkedNaverEntry) {
-    console.log(`[Orchestrator] Using user-linked Naver product: ${linkedNaverEntry.price}원`);
+    logger.info('Orchestrator', `Using user-linked Naver product: ${linkedNaverEntry.price}원`);
     naverResult = { price: linkedNaverEntry.price, shoppingUrl: linkedNaverEntry.url, productName: knownProductName || '', imageUrl: null };
   } else {
     const naverTimeout = lookupName ? timeout : timeout * 2;
@@ -74,7 +75,7 @@ export async function priceOrchestrator(
     ]);
     naverResult = naverSettled.status === 'fulfilled' ? naverSettled.value : null;
     if (naverSettled.status === 'rejected') {
-      console.warn('[Orchestrator] Naver failed:', (naverSettled.reason as Error)?.message);
+      logger.warn('Orchestrator', 'Naver failed', (naverSettled.reason as Error)?.message);
     }
   }
 

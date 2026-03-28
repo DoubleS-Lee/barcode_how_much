@@ -66,6 +66,7 @@ class PostModel {
   final int commentCount;
   final bool liked;
   final bool reported;
+  final bool isOwner;
   final List<PriceLookupModel> priceLookups;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -88,6 +89,7 @@ class PostModel {
     this.commentCount = 0,
     this.liked = false,
     this.reported = false,
+    this.isOwner = false,
     this.priceLookups = const [],
     required this.createdAt,
     required this.updatedAt,
@@ -111,6 +113,7 @@ class PostModel {
     commentCount: j['comment_count'] as int? ?? 0,
     liked: j['liked'] as bool? ?? false,
     reported: j['reported'] as bool? ?? false,
+    isOwner: j['is_owner'] as bool? ?? false,
     priceLookups: (j['price_lookups'] as List? ?? [])
         .map((e) => PriceLookupModel.fromJson(e as Map<String, dynamic>))
         .toList(),
@@ -118,7 +121,7 @@ class PostModel {
     updatedAt: DateTime.parse(j['updated_at']),
   );
 
-  PostModel copyWith({bool? liked, int? likeCount, bool? reported, int? reportCount}) => PostModel(
+  PostModel copyWith({bool? liked, int? likeCount, bool? reported, int? reportCount, bool? isOwner}) => PostModel(
     id: id,
     authorId: authorId,
     title: title,
@@ -136,10 +139,24 @@ class PostModel {
     commentCount: commentCount,
     liked: liked ?? this.liked,
     reported: reported ?? this.reported,
+    isOwner: isOwner ?? this.isOwner,
     priceLookups: priceLookups,
     createdAt: createdAt,
     updatedAt: updatedAt,
   );
+}
+
+// ── 페이지 결과 모델 ──────────────────────────────────────
+
+class PostsPageResult {
+  final List<PostModel> posts;
+  final int total;
+  final int page;
+  final int limit;
+
+  PostsPageResult({required this.posts, required this.total, required this.page, required this.limit});
+
+  bool get hasMore => page * limit < total;
 }
 
 // ── API 클래스 ────────────────────────────────────────────
@@ -158,15 +175,28 @@ class PostsApi {
     return res.data['image_url'] as String;
   }
 
-  static Future<List<PostModel>> fetchPosts({int page = 1, String? search, String? deviceUuid}) async {
+  static Future<PostsPageResult> fetchPosts({int page = 1, String? search, String? sort, String? deviceUuid}) async {
     final res = await _dio.get('/api/v1/posts', queryParameters: {
       'page': page,
       'limit': 20,
       if (search != null && search.isNotEmpty) 'search': search,
+      if (sort != null) 'sort': sort,
       if (deviceUuid != null) 'device_uuid': deviceUuid,
     });
     final list = res.data['posts'] as List;
-    return list.map((e) => PostModel.fromJson(e)).toList();
+    return PostsPageResult(
+      posts: list.map((e) => PostModel.fromJson(e as Map<String, dynamic>)).toList(),
+      total: res.data['total'] as int,
+      page: res.data['page'] as int,
+      limit: res.data['limit'] as int,
+    );
+  }
+
+  static Future<PostModel> fetchPost({required String id, String? deviceUuid}) async {
+    final res = await _dio.get('/api/v1/posts/$id', queryParameters: {
+      if (deviceUuid != null) 'device_uuid': deviceUuid,
+    });
+    return PostModel.fromJson(res.data as Map<String, dynamic>);
   }
 
   static Future<PostModel> createPost({
@@ -214,12 +244,12 @@ class PostsApi {
       'title': title,
       'content': content,
       'price': price,
-      'barcode': barcode,
-      'image_url': imageUrl,
+      if (barcode != null) 'barcode': barcode,
+      if (imageUrl != null) 'image_url': imageUrl,
       'share_location': shareLocation,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
-      'location_hint': locationHint,
+      if (locationHint != null) 'location_hint': locationHint,
     });
     return PostModel.fromJson(res.data);
   }

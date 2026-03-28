@@ -5,6 +5,7 @@ import { PriceResponse } from '../types/price.types';
 import { priceOrchestrator } from '../services/price-orchestrator.service';
 import { searchNaverCandidates } from '../services/naver.service';
 import prisma from '../db/prisma';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -27,6 +28,13 @@ router.get('/', async (req: Request, res: Response) => {
   const cached = await getCached<PriceResponse>(cacheKey);
   if (cached) {
     const ageMinutes = Math.floor((Date.now() - new Date(cached.cached_at).getTime()) / 60000);
+    // 이미지가 있는 캐시인데 상품에 이미지가 없는 경우 백그라운드 업데이트
+    if (cached.image_url) {
+      void prisma.product.updateMany({
+        where: { barcode, imageUrl: null },
+        data: { imageUrl: cached.image_url },
+      }).catch((e) => logger.warn('Price', 'Background image update failed', e));
+    }
     return res.json({ ...cached, cache_age_minutes: ageMinutes });
   }
 
@@ -34,14 +42,14 @@ router.get('/', async (req: Request, res: Response) => {
   // → 있으면 OFF/go-upc 호출 없이 바로 네이버 검색으로 단축
   const cachedProduct = await prisma.product.findUnique({
     where: { barcode },
-    select: { name: true, linkedNaverUrl: true, linkedNaverPrice: true },
+    select: { name: true, imageUrl: true, linkedNaverUrl: true, linkedNaverPrice: true },
   });
   // Mock 이름은 신뢰하지 않음 (개발환경 오염 방지)
   const knownProductName = cachedProduct?.name?.includes('(Mock)')
     ? undefined
     : cachedProduct?.name ?? undefined;
   if (knownProductName) {
-    console.log(`[Price] Found in local DB: "${knownProductName}"`);
+    logger.info('Price', `Found in local DB: "${knownProductName}"`);
   }
 
   // 사용자가 직접 연결한 네이버 상품이 있으면 그것을 우선 사용
@@ -64,13 +72,22 @@ router.get('/', async (req: Request, res: Response) => {
 
   // 상품명/이미지를 products 테이블에 upsert (히스토리 표시용)
   // Mock 이름은 저장하지 않음
-  // knownProductName이 있으면 사용자가 직접 수정한 이름 — 덮어쓰지 않음
-  if (result.product_name && !result.product_name.includes('(Mock)') && !knownProductName) {
-    prisma.product.upsert({
-      where: { barcode },
-      update: { name: result.product_name, imageUrl: result.image_url },
-      create: { barcode, name: result.product_name, imageUrl: result.image_url },
-    }).catch(() => {}); // 저장 실패해도 가격 응답은 정상 반환
+  // knownProductName이 있으면 사용자가 직접 수정한 이름 — 이름은 덮어쓰지 않음
+  if (result.product_name && !result.product_name.includes('(Mock)')) {
+    if (!knownProductName) {
+      // 신규 상품 — 이름 + 이미지 모두 저장
+      void prisma.product.upsert({
+        where: { barcode },
+        update: { name: result.product_name, imageUrl: result.image_url },
+        create: { barcode, name: result.product_name, imageUrl: result.image_url },
+      }).catch((e) => logger.warn('Price', 'Product upsert failed', e));
+    } else if (result.image_url && !cachedProduct?.imageUrl) {
+      // 기존 상품이지만 이미지가 없는 경우 — 이미지만 업데이트
+      void prisma.product.update({
+        where: { barcode },
+        data: { imageUrl: result.image_url },
+      }).catch((e) => logger.warn('Price', 'Product image update failed', e));
+    }
   }
 
   return res.json(result);
@@ -99,7 +116,7 @@ router.patch('/products/:barcode', async (req: Request, res: Response) => {
   });
 
   // 캐시 무효화 — 다음 스캔 시 수정된 이름으로 재검색
-  await deleteCache(getCacheKey('price', barcode)).catch(() => {});
+  await deleteCache(getCacheKey('price', barcode)).catch((e) => logger.warn('Price', 'Cache delete failed', e));
 
   return res.json({ barcode: product.barcode, name: product.name });
 });
@@ -148,18 +165,20 @@ router.post('/relink-naver', async (req: Request, res: Response) => {
       platform: 'naver',
       price,
       isLowest: true,
+      productUrl: shopping_url,
     },
   });
 
-  // 상품명 + 연결된 네이버 상품 저장 (재스캔 시 동일 상품 유지)
+  // 연결된 네이버 상품 저장 (재스캔 시 동일 상품 유지)
+  // name은 업데이트하지 않음 — 사용자가 직접 설정한 상품명 보존
   await prisma.product.upsert({
     where: { barcode },
-    update: { name: product_name, imageUrl: image_url ?? undefined, linkedNaverUrl: shopping_url, linkedNaverPrice: price },
+    update: { imageUrl: image_url ?? undefined, linkedNaverUrl: shopping_url, linkedNaverPrice: price },
     create: { barcode, name: product_name, imageUrl: image_url ?? null, linkedNaverUrl: shopping_url, linkedNaverPrice: price },
   });
 
   // 캐시 무효화 — 다음 스캔 시 재연결된 상품명으로 재검색
-  await deleteCache(getCacheKey('price', barcode)).catch(() => {});
+  await deleteCache(getCacheKey('price', barcode)).catch((e) => logger.warn('Price', 'Cache delete failed', e));
 
   return res.json({ ok: true });
 });

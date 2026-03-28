@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import prisma from '../db/prisma';
 import { triggerPriceLookup } from '../services/priceLookup';
+import { getCached, setCache } from '../cache/redis';
+
+// UUID를 익명 작성자 ID로 변환 (단방향 해시, 역추적 불가)
+function toAuthorId(deviceUuid: string): string {
+  return crypto.createHash('sha256').update(deviceUuid).digest('hex').substring(0, 20);
+}
 
 // 업로드 디렉토리 생성
 const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'posts');
@@ -28,9 +36,9 @@ const upload = multer({
 
 const router = Router();
 
-const serializePost = (p: any, extras?: { commentCount?: number; liked?: boolean; reported?: boolean }) => ({
+const serializePost = (p: any, extras?: { commentCount?: number; liked?: boolean; reported?: boolean; isOwner?: boolean }) => ({
   id: p.id.toString(),
-  author_id: p.deviceUuid.substring(0, 8),
+  author_id: toAuthorId(p.deviceUuid),
   title: p.title,
   content: p.content,
   price: p.price,
@@ -46,6 +54,7 @@ const serializePost = (p: any, extras?: { commentCount?: number; liked?: boolean
   comment_count: extras?.commentCount ?? p._count?.comments ?? 0,
   liked: extras?.liked ?? false,
   reported: extras?.reported ?? false,
+  is_owner: extras?.isOwner ?? false,
   price_lookups: (p.priceLookups ?? []).map((pl: any) => ({
     platform: pl.platform,
     price: pl.price,
@@ -80,6 +89,13 @@ router.get('/', async (req: Request, res: Response) => {
   const skip = (page - 1) * limit;
   const search = (req.query.search as string)?.trim() || undefined;
   const device_uuid = req.query.device_uuid as string | undefined;
+  const sort = (req.query.sort as string) || 'latest';
+
+  const orderBy: Prisma.PostOrderByWithRelationInput =
+    sort === 'likes'    ? { likeCount: 'desc' } :
+    sort === 'popular'  ? { viewCount: 'desc' } :
+    sort === 'comments' ? { comments: { _count: 'desc' } } :
+                          { createdAt: 'desc' };
 
   const where = search
     ? { OR: [
@@ -89,7 +105,7 @@ router.get('/', async (req: Request, res: Response) => {
     : {};
 
   const [posts, total] = await Promise.all([
-    prisma.post.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit, select: postSelect }),
+    prisma.post.findMany({ where, orderBy, skip, take: limit, select: postSelect }),
     prisma.post.count({ where }),
   ]);
 
@@ -114,6 +130,7 @@ router.get('/', async (req: Request, res: Response) => {
     posts: posts.map((p) => serializePost(p, {
       liked: likedSet.has(p.id.toString()),
       reported: reportedSet.has(p.id.toString()),
+      isOwner: device_uuid ? p.deviceUuid === device_uuid : false,
     })),
     total, page, limit,
   });
@@ -124,12 +141,31 @@ router.get('/:id', async (req: Request, res: Response) => {
   const id = BigInt(req.params.id as string);
   const device_uuid = req.query.device_uuid as string | undefined;
 
-  const post = await prisma.post.update({
-    where: { id },
-    data: { viewCount: { increment: 1 } },
-    include: { priceLookups: true, _count: { select: { comments: true } } },
-  });
-  if (!post) return res.status(404).json({ error: 'NOT_FOUND' });
+  // 중복 조회 방지: 동일 기기가 24시간 내 재조회 시 viewCount 증가 생략
+  let shouldIncrement = true;
+  if (device_uuid) {
+    const viewKey = `postview:${id}:${device_uuid}`;
+    const alreadyViewed = await getCached<boolean>(viewKey);
+    if (alreadyViewed) {
+      shouldIncrement = false;
+    } else {
+      await setCache(viewKey, true, 60 * 60 * 24); // 24시간 TTL
+    }
+  }
+
+  let post;
+  try {
+    post = await prisma.post.update({
+      where: { id },
+      data: shouldIncrement ? { viewCount: { increment: 1 } } : {},
+      include: { priceLookups: true, _count: { select: { comments: true } } },
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+    throw e;
+  }
 
   let liked = false;
   let reported = false;
@@ -142,7 +178,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     reported = !!report;
   }
 
-  res.json(serializePost(post, { liked, reported }));
+  res.json(serializePost(post, { liked, reported, isOwner: device_uuid ? post.deviceUuid === device_uuid : false }));
 });
 
 // POST /api/v1/posts
@@ -180,7 +216,7 @@ router.post('/', async (req: Request, res: Response) => {
   const searchQuery = barcode ?? title;
   if (searchQuery) triggerPriceLookup(post.id, searchQuery);
 
-  res.status(201).json(serializePost(post));
+  res.status(201).json(serializePost(post, { isOwner: true }));
 });
 
 // PUT /api/v1/posts/:id
@@ -226,7 +262,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     include: { priceLookups: true, _count: { select: { comments: true } } },
   });
 
-  res.json(serializePost(updated));
+  res.json(serializePost(updated, { isOwner: true }));
 });
 
 // DELETE /api/v1/posts/:id
@@ -260,7 +296,7 @@ router.post('/:id/like', async (req: Request, res: Response) => {
   }
 
   const likeCount = await prisma.postLike.count({ where: { postId: id } });
-  await prisma.post.update({ where: { id }, data: { likeCount } });
+  await prisma.post.update({ where: { id }, data: { likeCount } }).catch(() => {});
 
   res.json({ liked: !existing, like_count: likeCount });
 });
@@ -282,7 +318,7 @@ router.post('/:id/report', async (req: Request, res: Response) => {
 
   await prisma.postReport.create({ data: { postId: id, deviceUuid: device_uuid } });
   const reportCount = await prisma.postReport.count({ where: { postId: id } });
-  await prisma.post.update({ where: { id }, data: { reportCount } });
+  await prisma.post.update({ where: { id }, data: { reportCount } }).catch(() => {});
 
   res.json({ reported: true, report_count: reportCount });
 });
@@ -299,7 +335,7 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
 
   res.json(comments.map((c) => ({
     id: c.id.toString(),
-    author_id: c.deviceUuid.substring(0, 8),
+    author_id: toAuthorId(c.deviceUuid),
     content: c.content,
     is_owner: device_uuid ? c.deviceUuid === device_uuid : false,
     created_at: c.createdAt,
@@ -322,7 +358,7 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
 
   res.status(201).json({
     id: comment.id.toString(),
-    author_id: comment.deviceUuid.substring(0, 8),
+    author_id: toAuthorId(comment.deviceUuid),
     content: comment.content,
     is_owner: true,
     created_at: comment.createdAt,
