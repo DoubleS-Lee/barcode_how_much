@@ -1,5 +1,6 @@
 ﻿import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme.dart';
 import '../../shared/api/posts_api.dart';
 import '../../shared/providers/auth_provider.dart';
+import '../../shared/providers/saved_locations_provider.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/utils/image_utils.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
@@ -22,8 +24,8 @@ import '../../shared/widgets/app_bottom_nav.dart';
 
 const _sortOptions = [
   ('latest', '최신순'),
-  ('likes', '추천순'),
-  ('popular', '인기순'),
+  ('likes', '추천순 (최근 2주)'),
+  ('popular', '인기순 (최근 2주)'),
   ('comments', '댓글순'),
 ];
 
@@ -194,41 +196,44 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
-          // ── 정렬 탭 ──
+          // ── 정렬 드롭다운 ──
           Container(
             color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _sortOptions.map((opt) {
-                  final isSelected = _sort == opt.$1;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(opt.$2,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-                            color: isSelected ? Colors.white : kOnSurfaceVariant,
-                          )),
-                      selected: isSelected,
-                      selectedColor: kPrimary,
-                      backgroundColor: kBackground,
-                      side: BorderSide.none,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _sort = opt.$1),
-                    ),
-                  );
-                }).toList(),
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                Text('정렬',
+                    style: GoogleFonts.inter(
+                        fontSize: 13, color: kOnSurfaceVariant)),
+                const SizedBox(width: 8),
+                DropdownButton<String>(
+                  value: _sort,
+                  underline: const SizedBox(),
+                  isDense: true,
+                  style: GoogleFonts.inter(fontSize: 13, color: kOnSurface),
+                  selectedItemBuilder: (_) => _sortOptions
+                      .map((opt) => Center(
+                            child: Text(opt.$2,
+                                style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: kPrimary)),
+                          ))
+                      .toList(),
+                  items: _sortOptions
+                      .map((opt) => DropdownMenuItem<String>(
+                            value: opt.$1,
+                            child: Text(opt.$2,
+                                style: GoogleFonts.inter(fontSize: 13)),
+                          ))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _sort = v);
+                  },
+                ),
+              ],
             ),
           ),
-
-          // ── 배너 광고 ──
-          if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
-              defaultTargetPlatform == TargetPlatform.iOS))
-            const _BannerAdWidget(),
 
           // ── 게시글 목록 ──
           Expanded(
@@ -276,39 +281,62 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
     );
   }
 
-  void _onWriteTap(BuildContext context) {
+  void _onWriteTap(BuildContext context) async {
     final isLoggedIn = ref.read(authProvider).valueOrNull?.isLoggedIn ?? false;
     if (!isLoggedIn) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text('로그인이 필요해요',
-              style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
-          content: Text(
-            '공유 게시판 글쓰기는\n소셜 로그인 후 이용할 수 있어요.',
-            style: GoogleFonts.inter(fontSize: 14, height: 1.5),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Future.microtask(() {
-                  if (context.mounted) context.push('/settings');
-                });
-              },
-              child: Text('로그인하러 가기', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-            ),
-          ],
-        ),
+      _showWriteBlockDialog(
+        context,
+        title: '로그인이 필요해요',
+        content: '공유 게시판 글쓰기는\n소셜 로그인 후 이용할 수 있어요.',
+        buttonLabel: '설정으로 가기',
+      );
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final nickname = prefs.getString('device_nickname') ?? '';
+    if (!context.mounted) return;
+    if (nickname.isEmpty) {
+      _showWriteBlockDialog(
+        context,
+        title: '닉네임을 먼저 설정해주세요',
+        content: '게시글 작성을 위해\n설정에서 닉네임을 입력해주세요.',
+        buttonLabel: '설정으로 가기',
       );
       return;
     }
     _showPostDialog(context);
+  }
+
+  void _showWriteBlockDialog(
+    BuildContext context, {
+    required String title,
+    required String content,
+    required String buttonLabel,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(title,
+            style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+        content: Text(content, style: GoogleFonts.inter(fontSize: 14, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Future.microtask(() {
+                if (context.mounted) context.push('/settings');
+              });
+            },
+            child: Text(buttonLabel, style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showPostDialog(BuildContext context, {PostModel? editing}) {
@@ -554,7 +582,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                '${_post.authorId}...',
+                _post.nickname ?? '익명 ${_post.authorId.substring(0, 6)}',
                 style: GoogleFonts.inter(
                     fontSize: 10, fontWeight: FontWeight.w600, color: kPrimary),
               ),
@@ -588,7 +616,7 @@ class _PostCardState extends ConsumerState<_PostCard> {
             ),
             const SizedBox(width: 8),
             Text(
-              DateFormat('MM.dd HH:mm').format(_post.createdAt.toLocal()),
+              DateFormat("yy.MM.dd").format(_post.createdAt.toLocal()),
               style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
             ),
           ]),
@@ -984,7 +1012,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            '${_post.authorId}...',
+                            _post.nickname ?? '익명 ${_post.authorId.substring(0, 6)}',
                             style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
@@ -1062,20 +1090,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
                         ),
                       ],
                       const SizedBox(height: 16),
-
-                      // ── 가격 조회 섹션 ──
-                      if (_post.priceLookups.isNotEmpty) ...[
-                        const Divider(),
-                        const SizedBox(height: 12),
-                        Text('온라인 최저가',
-                            style: GoogleFonts.plusJakartaSans(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: kOnSurface)),
-                        const SizedBox(height: 8),
-                        ..._post.priceLookups.map((pl) => _PriceLookupRow(pl: pl)),
-                        const SizedBox(height: 12),
-                      ],
 
                       // ── 좋아요 / 공유 / 신고 버튼 ──
                       Row(children: [
@@ -1261,91 +1275,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet> {
   }
 }
 
-// ── 가격 조회 행 ──────────────────────────────────────────
-
-class _PriceLookupRow extends StatelessWidget {
-  final PriceLookupModel pl;
-  const _PriceLookupRow({required this.pl});
-
-  String get _platformLabel => switch (pl.platform) {
-    'naver' => '네이버쇼핑',
-    'coupang' => '쿠팡',
-    _ => pl.platform,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: kOnSurfaceVariant.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(_platformLabel,
-              style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: kOnSurface)),
-        ),
-        const SizedBox(width: 10),
-        if (pl.price != null)
-          Text(
-            '${NumberFormat('#,###').format(pl.price)}원',
-            style: GoogleFonts.plusJakartaSans(
-                fontSize: 14, fontWeight: FontWeight.w700, color: kPrimary),
-          )
-        else
-          Text('정보 없음',
-              style: GoogleFonts.inter(
-                  fontSize: 13, color: kOnSurfaceVariant)),
-        if (pl.productName != null) ...[
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              pl.productName!,
-              style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ] else
-          const Spacer(),
-        if (pl.productUrl != null) ...[
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () async {
-              final uri = Uri.tryParse(pl.productUrl!);
-              if (uri != null && await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: kPrimary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: kPrimary.withValues(alpha: 0.2)),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.open_in_new, size: 11, color: kPrimary),
-                const SizedBox(width: 3),
-                Text(
-                  '상품 보기',
-                  style: GoogleFonts.inter(
-                      fontSize: 11, fontWeight: FontWeight.w600, color: kPrimary),
-                ),
-              ]),
-            ),
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
 // ── 댓글 행 ──────────────────────────────────────────────
 
 class _CommentRow extends StatelessWidget {
@@ -1358,27 +1287,11 @@ class _CommentRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: kPrimary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Center(
-            child: Text(
-              comment.authorId.isNotEmpty ? comment.authorId[0].toUpperCase() : '?',
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 12, fontWeight: FontWeight.w700, color: kPrimary),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Text(
-                '${comment.authorId}...',
+                comment.nickname ?? '익명 ${comment.authorId.isNotEmpty ? comment.authorId.substring(0, 6) : '?'}',
                 style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -1642,19 +1555,48 @@ class _PostFormSheetState extends ConsumerState<_PostFormSheet> {
               const SizedBox(height: 4),
 
               // ── 장소 ──
-              TextField(
-                controller: _locationHintCtrl,
-                decoration: InputDecoration(
-                  labelText: '장소명 (선택사항)',
-                  hintText: '예: 이마트 왕십리점',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
-                  prefixIcon: const Icon(Icons.place_outlined, size: 18),
-                ),
-                style: GoogleFonts.inter(fontSize: 14),
-              ),
+              Builder(builder: (context) {
+                final savedLocs = ref.watch(savedLocationsProvider);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (savedLocs.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: savedLocs.map((loc) => GestureDetector(
+                            onTap: () => setState(() => _locationHintCtrl.text = loc),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: kPrimary.withValues(alpha: 0.07),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: kPrimary.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(loc,
+                                style: GoogleFonts.inter(fontSize: 12, color: kPrimary, fontWeight: FontWeight.w500)),
+                            ),
+                          )).toList(),
+                        ),
+                      ),
+                    TextField(
+                      controller: _locationHintCtrl,
+                      decoration: InputDecoration(
+                        labelText: '장소명 (선택사항)',
+                        hintText: '예: 이마트 왕십리점',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        prefixIcon: const Icon(Icons.place_outlined, size: 18),
+                      ),
+                      style: GoogleFonts.inter(fontSize: 14),
+                    ),
+                  ],
+                );
+              }),
               const SizedBox(height: 12),
 
               // ── 금액 ──

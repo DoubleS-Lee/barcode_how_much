@@ -15,6 +15,7 @@ import '../scan_history/price_graph_widget.dart';
 import '../scan_history/scan_history_provider.dart';
 import 'price_result_provider.dart';
 import 'recommend_provider.dart';
+import '../../shared/providers/saved_locations_provider.dart';
 
 class PriceResultScreen extends ConsumerWidget {
   final String barcode;
@@ -749,8 +750,6 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
             },
           ),
 
-          // AdMob 배너
-          const AdmobBanner(),
           const SizedBox(height: 24),
 
           // 인기 유사상품 추천 섹션
@@ -810,21 +809,45 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
 
   Future<void> _showStoreDialog() async {
     final controller = TextEditingController(text: _storeHint ?? '');
+    final savedLocations = ref.read(savedLocationsProvider);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('장소', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 100,
-          decoration: InputDecoration(
-            hintText: '이마트 왕십리점',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          ),
-          style: GoogleFonts.inter(fontSize: 14),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (savedLocations.isNotEmpty) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: savedLocations.map((loc) => GestureDetector(
+                  onTap: () => controller.text = loc,
+                  child: Chip(
+                    label: Text(loc, style: GoogleFonts.inter(fontSize: 11)),
+                    backgroundColor: kPrimary.withValues(alpha: 0.06),
+                    side: BorderSide(color: kPrimary.withValues(alpha: 0.2)),
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                )).toList(),
+              ),
+              const SizedBox(height: 10),
+            ],
+            TextField(
+              controller: controller,
+              autofocus: savedLocations.isEmpty,
+              maxLength: 100,
+              decoration: InputDecoration(
+                hintText: '이마트 왕십리점',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -983,6 +1006,7 @@ class _PriceResultBodyState extends ConsumerState<_PriceResultBody> {
         initialStore: _storeHint,
         initialMemo: _memo,
         initialPrice: _pendingOfflinePrice,
+        savedLocations: ref.read(savedLocationsProvider),
         onConfirmed: (price, store, memo) {
           setState(() {
             _pendingOfflinePrice = price;
@@ -1893,12 +1917,14 @@ class _OfflinePriceSheet extends StatefulWidget {
   final String? initialStore;
   final String? initialMemo;
   final int? initialPrice;
+  final List<String> savedLocations;
   final void Function(int price, String? store, String? memo) onConfirmed;
 
   const _OfflinePriceSheet({
     this.initialStore,
     this.initialMemo,
     this.initialPrice,
+    this.savedLocations = const [],
     required this.onConfirmed,
   });
 
@@ -2062,6 +2088,23 @@ class _OfflinePriceSheetState extends State<_OfflinePriceSheet> {
                   }).toList(),
                 ),
                 const SizedBox(height: 10),
+                if (widget.savedLocations.isNotEmpty) ...[
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: widget.savedLocations.map((loc) => GestureDetector(
+                      onTap: () => setState(() => _storeCtrl.text = loc),
+                      child: Chip(
+                        label: Text(loc, style: GoogleFonts.inter(fontSize: 11)),
+                        backgroundColor: kPrimary.withValues(alpha: 0.06),
+                        side: BorderSide(color: kPrimary.withValues(alpha: 0.2)),
+                        padding: EdgeInsets.zero,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Row(
                   children: [
                     Expanded(

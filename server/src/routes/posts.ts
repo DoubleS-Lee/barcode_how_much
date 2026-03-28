@@ -14,6 +14,27 @@ function toAuthorId(deviceUuid: string): string {
   return crypto.createHash('sha256').update(deviceUuid).digest('hex').substring(0, 20);
 }
 
+// device_uuid 배열 → { deviceUuid: nickname } 맵 (SocialAccount 기반)
+async function buildNicknameMap(deviceUuids: string[]): Promise<Map<string, string | null>> {
+  if (deviceUuids.length === 0) return new Map();
+  const devices = await prisma.device.findMany({
+    where: { deviceUuid: { in: deviceUuids } },
+    select: { deviceUuid: true, socialProvider: true, socialId: true },
+  });
+  const socialKeys = devices.filter((d) => d.socialProvider && d.socialId);
+  const socialAccounts = socialKeys.length > 0
+    ? await prisma.socialAccount.findMany({
+        where: { OR: socialKeys.map((d) => ({ provider: d.socialProvider!, socialId: d.socialId! })) },
+        select: { provider: true, socialId: true, nickname: true },
+      })
+    : [];
+  const saMap = new Map(socialAccounts.map((sa) => [`${sa.provider}:${sa.socialId}`, sa.nickname ?? null]));
+  return new Map(devices.map((d) => [
+    d.deviceUuid,
+    d.socialProvider && d.socialId ? (saMap.get(`${d.socialProvider}:${d.socialId}`) ?? null) : null,
+  ]));
+}
+
 // 업로드 디렉토리 생성
 const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'posts');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -36,9 +57,10 @@ const upload = multer({
 
 const router = Router();
 
-const serializePost = (p: any, extras?: { commentCount?: number; liked?: boolean; reported?: boolean; isOwner?: boolean }) => ({
+const serializePost = (p: any, extras?: { commentCount?: number; liked?: boolean; reported?: boolean; isOwner?: boolean; nickname?: string | null }) => ({
   id: p.id.toString(),
   author_id: toAuthorId(p.deviceUuid),
+  nickname: extras?.nickname ?? null,
   title: p.title,
   content: p.content,
   price: p.price,
@@ -97,12 +119,19 @@ router.get('/', async (req: Request, res: Response) => {
     sort === 'comments' ? { comments: { _count: 'desc' } } :
                           { createdAt: 'desc' };
 
-  const where = search
-    ? { OR: [
-        { title: { contains: search, mode: 'insensitive' as const } },
-        { content: { contains: search, mode: 'insensitive' as const } },
-      ]}
-    : {};
+  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const timeFilter: Prisma.PostWhereInput =
+    (sort === 'likes' || sort === 'popular') ? { createdAt: { gte: twoWeeksAgo } } : {};
+
+  const where: Prisma.PostWhereInput = {
+    ...timeFilter,
+    ...(search
+      ? { OR: [
+          { title: { contains: search, mode: 'insensitive' as const } },
+          { content: { contains: search, mode: 'insensitive' as const } },
+        ]}
+      : {}),
+  };
 
   const [posts, total] = await Promise.all([
     prisma.post.findMany({ where, orderBy, skip, take: limit, select: postSelect }),
@@ -126,11 +155,16 @@ router.get('/', async (req: Request, res: Response) => {
     reportedSet = new Set(reports.map((r) => r.postId.toString()));
   }
 
+  // 닉네임 배치 조회 (SocialAccount 기반)
+  const allUuids = [...new Set(posts.map((p) => p.deviceUuid))];
+  const nicknameMap = await buildNicknameMap(allUuids);
+
   res.json({
     posts: posts.map((p) => serializePost(p, {
       liked: likedSet.has(p.id.toString()),
       reported: reportedSet.has(p.id.toString()),
       isOwner: device_uuid ? p.deviceUuid === device_uuid : false,
+      nickname: nicknameMap.get(p.deviceUuid) ?? null,
     })),
     total, page, limit,
   });
@@ -178,7 +212,14 @@ router.get('/:id', async (req: Request, res: Response) => {
     reported = !!report;
   }
 
-  res.json(serializePost(post, { liked, reported, isOwner: device_uuid ? post.deviceUuid === device_uuid : false }));
+  const nickMap = await buildNicknameMap([post.deviceUuid]);
+
+  res.json(serializePost(post, {
+    liked,
+    reported,
+    isOwner: device_uuid ? post.deviceUuid === device_uuid : false,
+    nickname: nickMap.get(post.deviceUuid) ?? null,
+  }));
 });
 
 // POST /api/v1/posts
@@ -333,9 +374,13 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
     orderBy: { createdAt: 'asc' },
   });
 
+  const commentUuids = [...new Set(comments.map((c) => c.deviceUuid))];
+  const commentNicknameMap = await buildNicknameMap(commentUuids);
+
   res.json(comments.map((c) => ({
     id: c.id.toString(),
     author_id: toAuthorId(c.deviceUuid),
+    nickname: commentNicknameMap.get(c.deviceUuid) ?? null,
     content: c.content,
     is_owner: device_uuid ? c.deviceUuid === device_uuid : false,
     created_at: c.createdAt,
@@ -356,9 +401,15 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
     data: { postId: id, deviceUuid: device_uuid, content: content.trim() },
   });
 
+  const commentDevice = await prisma.device.findUnique({
+    where: { deviceUuid: device_uuid },
+    select: { nickname: true },
+  });
+
   res.status(201).json({
     id: comment.id.toString(),
     author_id: toAuthorId(comment.deviceUuid),
+    nickname: commentDevice?.nickname ?? null,
     content: comment.content,
     is_owner: true,
     created_at: comment.createdAt,

@@ -36,7 +36,6 @@ final routerProvider = Provider.family<GoRouter, String>((ref, initialRoute) {
       GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(path: '/privacy', builder: (_, __) => const PrivacyPolicyScreen()),
       GoRoute(path: '/terms', builder: (_, __) => const TermsScreen()),
-      GoRoute(path: '/marketing', builder: (_, __) => const MarketingInfoScreen()),
     ],
   );
 });

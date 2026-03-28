@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../shared/providers/saved_locations_provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -274,6 +275,27 @@ class _ManualPriceScreenState extends ConsumerState<ManualPriceScreen> {
                 ),
                 // 매장 / 메모 입력 (선택)
                 const SizedBox(height: 12),
+                Consumer(builder: (context, ref, _) {
+                  final locs = ref.watch(savedLocationsProvider);
+                  if (locs.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: locs.map((loc) => GestureDetector(
+                        onTap: () => _storeCtrl.text = loc,
+                        child: Chip(
+                          label: Text(loc, style: GoogleFonts.inter(fontSize: 11)),
+                          backgroundColor: kPrimary.withValues(alpha: 0.06),
+                          side: BorderSide(color: kPrimary.withValues(alpha: 0.2)),
+                          padding: EdgeInsets.zero,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      )).toList(),
+                    ),
+                  );
+                }),
                 Row(
                   children: [
                     Expanded(

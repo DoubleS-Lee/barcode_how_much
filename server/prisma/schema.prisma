@@ -13,8 +13,12 @@ model Device {
   os          String   @db.VarChar(10)
   country     String   @default("KR") @db.VarChar(10)
   appVersion  String?  @map("app_version") @db.VarChar(20)
-  fcmToken    String?  @map("fcm_token")
-  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  fcmToken       String?  @map("fcm_token")
+  nickname       String?  @unique @db.VarChar(30)
+  socialProvider      String?  @map("social_provider") @db.VarChar(20)
+  socialId            String?  @map("social_id") @db.VarChar(200)
+  nicknameChangeCount Int      @default(0) @map("nickname_change_count")
+  firstSeenAt         DateTime @default(now()) @map("first_seen_at")
   lastSeenAt  DateTime @default(now()) @map("last_seen_at")
   scans       Scan[]
 
@@ -147,6 +151,18 @@ model PostPriceLookup {
   productUrl  String?  @map("product_url")
   fetchedAt   DateTime @default(now()) @map("fetched_at")
   @@map("post_price_lookups")
+}
+
+// 소셜 계정 닉네임 — (provider, socialId) 쌍에 닉네임 귀속
+model SocialAccount {
+  id        BigInt   @id @default(autoincrement())
+  provider  String   @db.VarChar(20)
+  socialId  String   @map("social_id") @db.VarChar(200)
+  nickname  String?  @unique @db.VarChar(30)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, socialId])
+  @@map("social_accounts")
 }
 
 // 찜한 상품 (기기별 바코드 목록)

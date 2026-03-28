@@ -15,7 +15,6 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _termsAccepted = false;
   bool _privacyAccepted = false;
-  bool _marketingAccepted = false;
   bool _allAccepted = false;
 
   void _toggleAll(bool? value) {
@@ -24,13 +23,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _allAccepted = v;
       _termsAccepted = v;
       _privacyAccepted = v;
-      _marketingAccepted = v;
     });
   }
 
   void _updateAll() {
     setState(() {
-      _allAccepted = _termsAccepted && _privacyAccepted && _marketingAccepted;
+      _allAccepted = _termsAccepted && _privacyAccepted;
     });
   }
 
@@ -145,19 +143,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       },
                       onDetailTap: () => Navigator.push(context,
                         MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen())),
-                    ),
-                    const SizedBox(height: 20),
-                    _TermsRow(
-                      label: '마케팅 정보 수신',
-                      badge: '선택',
-                      isRequired: false,
-                      value: _marketingAccepted,
-                      onChanged: (v) {
-                        setState(() => _marketingAccepted = v ?? false);
-                        _updateAll();
-                      },
-                      onDetailTap: () => Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const MarketingInfoScreen())),
                     ),
                     const SizedBox(height: 80),
                   ],

@@ -15,6 +15,7 @@ import '../../shared/widgets/app_bottom_nav.dart';
 import '../price_result/recommend_provider.dart';
 import 'scan_history_provider.dart';
 import 'price_graph_widget.dart';
+import '../../shared/providers/saved_locations_provider.dart';
 
 
 class ScanHistoryScreen extends ConsumerStatefulWidget {
@@ -92,11 +93,6 @@ class _ScanHistoryScreenState extends ConsumerState<ScanHistoryScreen> {
               style: GoogleFonts.inter(fontSize: 13),
             ),
           ),
-          // ── 배너 광고 ──
-          if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
-              defaultTargetPlatform == TargetPlatform.iOS))
-            const _BannerAdWidget(),
-
           // ── 히스토리 바디 ──
           Expanded(
             child: historyAsync.when(
@@ -838,12 +834,30 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
               ],
             ),
           ),
-          title: Text(
-            group.name,
-            style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: kOnSurface),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          title: Row(children: [
+            Expanded(
+              child: Text(
+                group.name,
+                style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700, color: kOnSurface),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            GestureDetector(
+              onTap: () => _showEditNameDialog(context, ref, group.barcode, group.name),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Icon(Icons.edit_outlined, size: 14, color: kOnSurfaceVariant.withValues(alpha: 0.5)),
+              ),
+            ),
+            GestureDetector(
+              onTap: () => _confirmGroupDelete(context, ref, group),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Icon(Icons.delete_outline, size: 14, color: kError.withValues(alpha: 0.5)),
+              ),
+            ),
+          ]),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Column(
@@ -931,22 +945,10 @@ class _GroupedProductCardState extends State<_GroupedProductCard> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // 상품명 편집 버튼
-                  GestureDetector(
-                    onTap: () => _showEditNameDialog(context, ref, group.barcode, group.name),
-                    child: Icon(Icons.edit_outlined, size: 16, color: kOnSurfaceVariant.withValues(alpha: 0.6)),
-                  ),
-                  const SizedBox(width: 10),
                   // 가격 재검색 버튼
                   GestureDetector(
                     onTap: () => _repricingByName(context, ref, group.barcode, group.name),
                     child: Icon(Icons.search, size: 16, color: kPrimary.withValues(alpha: 0.7)),
-                  ),
-                  const SizedBox(width: 10),
-                  // 상품 그룹 삭제 버튼
-                  GestureDetector(
-                    onTap: () => _confirmGroupDelete(context, ref, group),
-                    child: Icon(Icons.delete_outline, size: 16, color: kError.withValues(alpha: 0.5)),
                   ),
                   const Spacer(),
                   // 스캔 횟수 뱃지
@@ -1206,6 +1208,7 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
     final storeCtrl = TextEditingController(text: _storeHint ?? '');
     final memoCtrl = TextEditingController(text: _memo ?? '');
 
+    final savedLocations = ref.read(savedLocationsProvider);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1225,6 +1228,23 @@ class _ScanHistoryRowState extends ConsumerState<_ScanHistoryRow> {
             style: GoogleFonts.inter(fontSize: 14),
           ),
           const SizedBox(height: 10),
+          if (savedLocations.isNotEmpty) ...[
+            StatefulBuilder(builder: (_, setS) => Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: savedLocations.map((loc) => GestureDetector(
+                onTap: () { storeCtrl.text = loc; setS(() {}); },
+                child: Chip(
+                  label: Text(loc, style: GoogleFonts.inter(fontSize: 11)),
+                  backgroundColor: kPrimary.withValues(alpha: 0.06),
+                  side: BorderSide(color: kPrimary.withValues(alpha: 0.2)),
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              )).toList(),
+            )),
+            const SizedBox(height: 8),
+          ],
           TextField(
             controller: storeCtrl,
             decoration: InputDecoration(

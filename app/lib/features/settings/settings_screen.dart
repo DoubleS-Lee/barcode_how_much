@@ -1,5 +1,8 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../shared/api/api_client.dart' as client;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,6 +19,8 @@ import '../../shared/providers/device_provider.dart';
 import '../../shared/providers/scan_settings_provider.dart';
 import '../../shared/utils/device_id.dart';
 import '../../shared/widgets/app_bottom_nav.dart';
+import '../../shared/providers/saved_locations_provider.dart';
+import '../../shared/providers/nickname_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -43,6 +48,21 @@ class SettingsScreen extends ConsumerWidget {
           children: [
             // 소셜 로그인
             _SocialLoginSection(),
+            const SizedBox(height: 28),
+
+            // 닉네임 (로그인 상태에서만 표시)
+            if (ref.watch(authProvider).valueOrNull?.isLoggedIn == true) ...[
+              _NicknameSection(),
+              const SizedBox(height: 28),
+            ],
+
+            // 즐겨찾기 장소
+            _SectionTitle('즐겨찾기 장소'),
+            const SizedBox(height: 6),
+            Text('자주 가는 매장을 저장해 가격 입력 시 빠르게 선택해요',
+                style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
+            const SizedBox(height: 10),
+            _SavedLocationsSection(),
             const SizedBox(height: 28),
 
             // 스캔 피드백
@@ -184,6 +204,115 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
 
   static final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
+  /// 소셜 로그인 연동 → 닉네임 반환 (null이면 새 닉네임 입력 필요)
+  Future<String?> _socialLink(String provider, String socialId) async {
+    try {
+      final uuid = await DeviceId.get();
+      final resp = await client.dio.post('/api/v1/devices/social-link', data: {
+        'device_uuid': uuid,
+        'provider': provider,
+        'social_id': socialId,
+      });
+      final nickname = resp.data['nickname'] as String?;
+      final prefs = await SharedPreferences.getInstance();
+      if (nickname != null && nickname.isNotEmpty) {
+        await prefs.setString('device_nickname', nickname);
+        await prefs.setBool('nickname_done', true);
+      } else {
+        await prefs.remove('device_nickname');
+        await prefs.remove('nickname_done');
+      }
+      ref.invalidate(nicknameProvider);
+      return nickname?.isNotEmpty == true ? nickname : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 소셜 로그인 직후 닉네임 입력 다이얼로그
+  Future<void> _showNicknameInputDialog() async {
+    if (!mounted) return;
+    final ctrl = TextEditingController();
+    String? errorText;
+    bool loading = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('닉네임을 설정해주세요',
+              style: GoogleFonts.plusJakartaSans(fontSize: 17, fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('게시판에서 사용할 닉네임을 입력해주세요.',
+                  style: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant, height: 1.5)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                maxLength: 15,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: '2~15자 (한글, 영문, 숫자, _)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  errorText: errorText,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                style: GoogleFonts.inter(fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '설정한 닉네임은 바꿀 수 없습니다',
+                style: GoogleFonts.inter(fontSize: 12, color: kError.withValues(alpha: 0.8), height: 1.4),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: loading ? null : () async {
+                final nickname = ctrl.text.trim();
+                if (nickname.length < 2) {
+                  setS(() => errorText = '2자 이상 입력해주세요');
+                  return;
+                }
+                final regex = RegExp(r'^[가-힣a-zA-Z0-9_]+$');
+                if (!regex.hasMatch(nickname)) {
+                  setS(() => errorText = '한글, 영문, 숫자, _ 만 사용 가능합니다');
+                  return;
+                }
+                setS(() { loading = true; errorText = null; });
+                try {
+                  final uuid = await DeviceId.get();
+                  await client.dio.post('/api/v1/devices/nickname',
+                      data: {'device_uuid': uuid, 'nickname': nickname});
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('device_nickname', nickname);
+                  await prefs.setBool('nickname_done', true);
+                  ref.invalidate(nicknameProvider);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  String msg = '오류가 발생했습니다';
+                  if (e is DioException) {
+                    final data = e.response?.data;
+                    if (data is Map && data['error'] == 'NICKNAME_TAKEN') {
+                      msg = '이미 사용 중인 닉네임입니다';
+                    }
+                  }
+                  setS(() { loading = false; errorText = msg; });
+                }
+              },
+              child: Text('확인', style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700, color: kPrimary)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _loginGoogle() async {
     if (kIsWeb || (!defaultTargetPlatform.isMobileOrMac)) {
       _showNotSupported();
@@ -195,6 +324,8 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       if (account != null && mounted) {
         await ref.read(authProvider.notifier).setLogin(
           'google', account.displayName ?? account.email, account.email);
+        final nickname = await _socialLink('google', account.id);
+        if (mounted && nickname == null) await _showNicknameInputDialog();
       }
     } catch (e) {
       if (mounted) _showSnack('구글 로그인 실패: $e');
@@ -218,7 +349,11 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       final user = await kakao.UserApi.instance.me();
       final name = user.kakaoAccount?.profile?.nickname ?? '카카오 사용자';
       final email = user.kakaoAccount?.email ?? '';
-      if (mounted) await ref.read(authProvider.notifier).setLogin('kakao', name, email);
+      if (mounted) {
+        await ref.read(authProvider.notifier).setLogin('kakao', name, email);
+        final nickname = await _socialLink('kakao', user.id.toString());
+        if (mounted && nickname == null) await _showNicknameInputDialog();
+      }
     } catch (e) {
       if (mounted) _showSnack('카카오 로그인 실패: $e');
     } finally {
@@ -238,6 +373,11 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       if (account != null && mounted) {
         await ref.read(authProvider.notifier).setLogin(
           'naver', account.name ?? '네이버 사용자', account.email ?? '');
+        final socialId = account.id?.isNotEmpty == true
+            ? account.id!
+            : (account.email ?? '');
+        final nickname = await _socialLink('naver', socialId);
+        if (mounted && nickname == null) await _showNicknameInputDialog();
       }
     } catch (e) {
       if (mounted) _showSnack('네이버 로그인 실패: $e');
@@ -253,6 +393,10 @@ class _SocialLoginSectionState extends ConsumerState<_SocialLoginSection> {
       if (loginType == 'google') await _googleSignIn.signOut();
       if (loginType == 'kakao') await kakao.UserApi.instance.logout();
       if (loginType == 'naver') await FlutterNaverLogin.logOut();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('device_nickname');
+      await prefs.remove('nickname_done');
+      ref.invalidate(nicknameProvider);
       if (mounted) await ref.read(authProvider.notifier).logout();
     } catch (_) {
       if (mounted) await ref.read(authProvider.notifier).logout();
@@ -687,6 +831,122 @@ class _TileShell extends StatelessWidget {
             trailing,
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── 닉네임 섹션 ─────────────────────────────────────────
+
+class _NicknameSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final nickname = ref.watch(nicknameProvider).valueOrNull;
+    return _TileShell(
+      icon: Icons.badge_outlined,
+      iconColor: kPrimary,
+      title: '닉네임',
+      subtitle: nickname ?? '미설정',
+      trailing: const SizedBox.shrink(),
+    );
+  }
+}
+
+// ── 즐겨찾기 장소 섹션 ────────────────────────────────────
+
+class _SavedLocationsSection extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_SavedLocationsSection> createState() =>
+      _SavedLocationsSectionState();
+}
+
+class _SavedLocationsSectionState extends ConsumerState<_SavedLocationsSection> {
+  Future<void> _showAddDialog() async {
+    final ctrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('장소 추가',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 50,
+          decoration: InputDecoration(
+            hintText: '이마트 왕십리점',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          style: GoogleFonts.inter(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('취소', style: GoogleFonts.inter(color: kOnSurfaceVariant)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('추가', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final loc = ctrl.text.trim();
+    if (loc.isNotEmpty) {
+      await ref.read(savedLocationsProvider.notifier).add(loc);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locations = ref.watch(savedLocationsProvider);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (locations.isEmpty)
+            Text('저장된 장소가 없어요',
+                style: GoogleFonts.inter(fontSize: 13, color: kOnSurfaceVariant))
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: locations
+                  .map((loc) => Chip(
+                        label: Text(loc,
+                            style: GoogleFonts.inter(
+                                fontSize: 12, color: kOnSurface)),
+                        backgroundColor: kPrimary.withValues(alpha: 0.06),
+                        side: BorderSide(color: kPrimary.withValues(alpha: 0.2)),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        deleteIcon: Icon(Icons.close,
+                            size: 14,
+                            color: kOnSurfaceVariant.withValues(alpha: 0.7)),
+                        onDeleted: () =>
+                            ref.read(savedLocationsProvider.notifier).remove(loc),
+                      ))
+                  .toList(),
+            ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: _showAddDialog,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.add_circle_outline, size: 16, color: kPrimary),
+              const SizedBox(width: 4),
+              Text('장소 추가',
+                  style: GoogleFonts.inter(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: kPrimary)),
+            ]),
+          ),
+        ],
       ),
     );
   }

@@ -25,6 +25,7 @@ class PriceLookupModel {
 class PostCommentModel {
   final String id;
   final String authorId;
+  final String? nickname;
   final String content;
   final bool isOwner;
   final DateTime createdAt;
@@ -32,6 +33,7 @@ class PostCommentModel {
   PostCommentModel({
     required this.id,
     required this.authorId,
+    this.nickname,
     required this.content,
     required this.isOwner,
     required this.createdAt,
@@ -40,6 +42,7 @@ class PostCommentModel {
   factory PostCommentModel.fromJson(Map<String, dynamic> j) => PostCommentModel(
     id: j['id'].toString(),
     authorId: j['author_id'] ?? '',
+    nickname: j['nickname'] as String?,
     content: j['content'] ?? '',
     isOwner: j['is_owner'] as bool? ?? false,
     createdAt: DateTime.parse(j['created_at']),
@@ -51,6 +54,7 @@ class PostCommentModel {
 class PostModel {
   final String id;
   final String authorId;
+  final String? nickname;
   final String title;
   final String content;
   final int price;
@@ -74,6 +78,7 @@ class PostModel {
   PostModel({
     required this.id,
     required this.authorId,
+    this.nickname,
     required this.title,
     required this.content,
     required this.price,
@@ -98,6 +103,7 @@ class PostModel {
   factory PostModel.fromJson(Map<String, dynamic> j) => PostModel(
     id: j['id'].toString(),
     authorId: j['author_id'] ?? '',
+    nickname: j['nickname'] as String?,
     title: j['title'] ?? '',
     content: j['content'] ?? '',
     price: j['price'] as int? ?? 0,
@@ -124,6 +130,7 @@ class PostModel {
   PostModel copyWith({bool? liked, int? likeCount, bool? reported, int? reportCount, bool? isOwner}) => PostModel(
     id: id,
     authorId: authorId,
+    nickname: nickname,
     title: title,
     content: content,
     price: price,

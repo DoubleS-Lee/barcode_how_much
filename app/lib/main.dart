@@ -17,24 +17,26 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
 
-  // Firebase + AdMob 병렬 초기화 (runApp 전 필수 작업만)
+  // Firebase + AdMob 초기화
   if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS)) {
     try {
-      await Future.wait([
-        Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
-        MobileAds.instance.initialize(),
-      ]);
+      // Firebase만 awaiting (FCM 등 사용 전 필수)
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     } catch (e) {
-      debugPrint('[Init] Firebase/AdMob 초기화 실패: $e');
+      debugPrint('[Init] Firebase 초기화 실패: $e');
     }
+    // AdMob은 non-blocking — 광고 로드 전에 완료되면 충분
+    // ignore: unawaited_futures
+    MobileAds.instance.initialize();
     KakaoSdk.init(nativeAppKey: kKakaoNativeAppKey);
   }
 
   final prefs = await SharedPreferences.getInstance();
   final onboardingDone = prefs.getBool('onboarding_done') ?? false;
+  final initialRoute = onboardingDone ? '/scanner' : '/onboarding';
   runApp(ProviderScope(
-    child: EolmaeApp(initialRoute: onboardingDone ? '/scanner' : '/onboarding'),
+    child: EolmaeApp(initialRoute: initialRoute),
   ));
 }
 
